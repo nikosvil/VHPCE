@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "flagship",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8077", "--directory", "apps/flagship-zero-build"],
+      "port": 8077
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "C:/Program Files/nodejs/node.exe",
+      "runtimeArgs": ["apps/web/node_modules/next/dist/bin/next", "dev", "apps/web", "--port", "3000"],
+      "port": 3000
+    }
+  ]
+}

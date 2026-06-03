@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Why Parallel Code Gets Slower — Visual HPC for Engineers</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<style>
+  :root{
+    --bg:#080b11; --bg2:#0b0f17; --panel:#0f1622; --panel2:#0c121c; --line:#1d2838;
+    --text:#e6edf3; --muted:#8a9bb4; --dim:#5e6e88;
+    --accent:#4cc9f0; --accent2:#b388ff; --good:#3ddc97; --warn:#ffb454; --bad:#ff5d73;
+    --mono:"SFMono-Regular",ui-monospace,"Cascadia Code",Consolas,monospace;
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 600px at 85% -10%, rgba(76,201,240,.08), transparent 60%),
+      radial-gradient(900px 500px at 5% 110%, rgba(179,136,255,.07), transparent 60%),
+      var(--bg);
+    color:var(--text); font-family:var(--sans); font-size:14px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{max-width:1320px;margin:0 auto;padding:18px 22px 40px;}
+  header.top{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:14px}
+  .brand h1{font-size:20px;margin:0;letter-spacing:.2px}
+  .brand h1 .why{color:var(--accent)}
+  .brand .sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .src-badge{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-family:var(--mono);font-size:11.5px}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  .pill.disabled{opacity:.45}
+  .pill.click{cursor:pointer;transition:.15s}
+  .pill.click:hover{border-color:#33455f}
+  .pill:not(.sel) .dot{background:var(--dim);box-shadow:none}
+  .pill.sel{border-color:#33455f;color:var(--text)}
+  .pill.sel .dot{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+
+  nav.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+  .tab{appearance:none;border:1px solid var(--line);background:var(--panel2);color:var(--muted);
+    padding:9px 14px;border-radius:10px;cursor:pointer;font-family:var(--sans);font-size:13px;font-weight:500;transition:.15s}
+  .tab:hover{color:var(--text);border-color:#2c3a50}
+  .tab.active{color:#04121a;background:linear-gradient(180deg,var(--accent),#37b6df);border-color:transparent;box-shadow:0 6px 18px rgba(76,201,240,.25)}
+  .tab .ix{font-family:var(--mono);opacity:.6;margin-right:7px}
+  .tab.active .ix{opacity:.8}
+
+  .grid{display:grid;grid-template-columns:268px 1fr 280px;gap:14px;align-items:stretch}
+  @media(max-width:1080px){.grid{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h2{font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--dim);margin:0 0 14px;font-weight:600}
+
+  /* controls */
+  .ctrl{margin-bottom:18px}
+  .ctrl:last-child{margin-bottom:0}
+  .ctrl label{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;color:var(--muted);margin-bottom:7px}
+  .ctrl label b{color:var(--text);font-family:var(--mono);font-size:13px;font-weight:600}
+  input[type=range]{width:100%;-webkit-appearance:none;height:5px;border-radius:5px;background:#1a2536;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 0 4px rgba(76,201,240,.18)}
+  input[type=range]::-moz-range-thumb{width:16px;height:16px;border:none;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 0 4px rgba(76,201,240,.18)}
+  .seg{display:flex;gap:5px;flex-wrap:wrap}
+  .seg button{flex:1 1 auto;min-width:64px;border:1px solid var(--line);background:#0c1320;color:var(--muted);padding:8px 6px;border-radius:8px;cursor:pointer;font-size:12px;font-family:var(--sans);transition:.12s}
+  .seg button:hover{color:var(--text);border-color:#2c3a50}
+  .seg button.on{color:#04121a;background:var(--accent);border-color:transparent;font-weight:600}
+  .seg.fix button.on{background:var(--good)}
+  .toggle{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+  .toggle .track{width:42px;height:24px;border-radius:999px;background:#1a2536;position:relative;transition:.18s;border:1px solid var(--line)}
+  .toggle .knob{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--muted);transition:.18s}
+  .toggle.on .track{background:rgba(61,220,151,.25);border-color:var(--good)}
+  .toggle.on .knob{left:21px;background:var(--good);box-shadow:0 0 10px var(--good)}
+  .fixhint{font-size:11.5px;color:var(--dim);margin-top:8px;line-height:1.4}
+
+  /* viz */
+  .vizwrap{position:relative;min-height:380px;display:flex;flex-direction:column}
+  .vizwrap h2{display:flex;justify-content:space-between;align-items:center}
+  .vizwrap h2 .scene-tag{color:var(--muted);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px}
+  canvas#viz{width:100%;flex:1;border-radius:10px;display:block;background:radial-gradient(600px 300px at 50% 0%,rgba(76,201,240,.05),transparent 70%),#070a10;border:1px solid #15202f}
+
+  /* metrics */
+  .metric{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px dashed #182335}
+  .metric:last-child{border-bottom:none}
+  .metric .k{color:var(--muted);font-size:12.5px}
+  .metric .v{font-family:var(--mono);font-size:15px;font-weight:600}
+  .v.good{color:var(--good)} .v.warn{color:var(--warn)} .v.bad{color:var(--bad)} .v.accent{color:var(--accent)}
+  .hero{margin:-4px 0 12px;padding:12px;border-radius:10px;background:#0a111c;border:1px solid var(--line);text-align:center}
+  .hero .big{font-family:var(--mono);font-size:30px;font-weight:700;line-height:1}
+  .hero .cap{font-size:11px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:1px}
+
+  /* charts + explanation */
+  .lower{display:grid;grid-template-columns:1fr;gap:14px;margin-top:14px}
+  .charts{display:grid;grid-template-columns:1fr;gap:14px}
+  .charts.two{grid-template-columns:1fr 1fr}
+  @media(max-width:1080px){.charts.two{grid-template-columns:1fr}}
+  .chart svg{width:100%;height:260px;display:block}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:4px}
+  .legend i{display:inline-block;width:18px;height:0;border-top:3px solid;vertical-align:middle;margin-right:6px}
+  .axis text{fill:var(--dim);font-size:10px;font-family:var(--mono)}
+  .axis path,.axis line{stroke:#1b2738}
+  .grid-line{stroke:#121b28}
+
+  .explain .blocks{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.explain .blocks{grid-template-columns:1fr}}
+  .eb{padding:12px 14px;border-radius:10px;background:#0a111c;border-left:3px solid var(--accent)}
+  .eb.what{border-color:var(--accent)} .eb.why{border-color:var(--accent2)}
+  .eb.how{border-color:var(--good)} .eb.exp{border-color:var(--warn)}
+  .eb .t{font-size:10.5px;text-transform:uppercase;letter-spacing:1.4px;color:var(--dim);margin-bottom:6px;font-weight:600}
+  .eb .body{font-size:13px;color:var(--text)}
+  .eb .body b{color:#fff}
+  .sev{display:inline-block;font-size:10px;font-family:var(--mono);padding:2px 8px;border-radius:6px;margin-left:8px;vertical-align:middle}
+  .sev.critical{background:rgba(255,93,115,.16);color:var(--bad)}
+  .sev.warn{background:rgba(255,180,84,.16);color:var(--warn)}
+  .sev.info{background:rgba(61,220,151,.16);color:var(--good)}
+
+  footer.note{margin-top:22px;color:var(--dim);font-size:11.5px;line-height:1.6;border-top:1px solid var(--line);padding-top:14px}
+  footer.note code{font-family:var(--mono);color:var(--muted);background:#0c121c;padding:1px 5px;border-radius:4px}
+  a{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <h1><span class="why">Why</span> Parallel Code Gets Slower</h1>
+      <div class="sub">Visual HPC for Engineers · flagship demo — flip the fix and watch the hardware react</div>
+    </div>
+    <div class="src-badge">
+      <span style="margin-right:2px">data source:</span>
+      <span class="pill click sel" id="pillModel"><span class="dot"></span>Model</span>
+      <span class="pill disabled" id="pillMeasured" title="checking runner…"><span class="dot"></span>Measured · 24 cores</span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+
+  <div class="grid">
+    <section class="card" id="controls"><h2>Controls</h2><div id="controlBody"></div></section>
+
+    <section class="card vizwrap">
+      <h2><span id="sceneTitle">Visualization</span><span class="scene-tag" id="sceneTag"></span></h2>
+      <canvas id="viz"></canvas>
+    </section>
+
+    <section class="card">
+      <h2>Live metrics</h2>
+      <div class="hero"><div class="big" id="heroBig">—</div><div class="cap" id="heroCap">speedup</div></div>
+      <div id="metrics"></div>
+    </section>
+  </div>
+
+  <div class="lower">
+    <section class="card">
+      <h2>Scaling · 1 → 24 threads</h2>
+      <div class="charts" id="chartRow">
+        <div class="chart"><svg id="scalingChart"></svg>
+          <div class="legend">
+            <span><i style="border-color:#33405a"></i>ideal (linear)</span>
+            <span><i style="border-color:var(--accent)"></i>actual speedup</span>
+            <span><i style="border-color:var(--accent2)"></i>efficiency</span>
+          </div>
+        </div>
+        <div class="chart" id="rooflineBox" style="display:none"><svg id="rooflineChart"></svg>
+          <div class="legend">
+            <span><i style="border-color:var(--bad)"></i>memory ceiling</span>
+            <span><i style="border-color:var(--warn)"></i>compute ceiling</span>
+            <span><i style="border-color:var(--accent)"></i>your kernel</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card explain">
+      <h2>Diagnosis <span class="sev" id="sev"></span></h2>
+      <div class="blocks">
+        <div class="eb what"><div class="t">What happened</div><div class="body" id="exWhat"></div></div>
+        <div class="eb why"><div class="t">Why</div><div class="body" id="exWhy"></div></div>
+        <div class="eb how"><div class="t">How to fix</div><div class="body" id="exHow"></div></div>
+        <div class="eb exp"><div class="t">Expected after fix</div><div class="body" id="exExp"></div></div>
+      </div>
+    </section>
+  </div>
+
+  <footer class="note">
+    <b>Model</b> numbers come from physically-grounded formulas (Amdahl, cache-coherence cost,
+    bandwidth saturation, load-imbalance) — every curve traces to <code>docs/04-performance-models.md</code>.
+    <b>Measured</b> numbers are <b>real</b>: OpenMP kernels compiled and run on this laptop's 24 cores
+    by a local <code>WSL2</code> runner (<code>services/runner</code>). Toggle the data source above —
+    the <code>ProfileResult</code> seam means the charts, metrics, and explanations are identical
+    machinery for both. The thread-timeline animations stay schematic; the data is what changes.
+    Respects <code>prefers-reduced-motion</code>.
+  </footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+const d3 = window.d3;
+const MAXP = 24;
+const REF = { id:"ref/this-laptop-24c", cores:24, cacheLine:64, BW_peak:40, P_peak:200, p_half:3 };
+// Canvas 2D and SVG presentation attributes do NOT resolve CSS var(); use literal colors here.
+const C={accent:"#4cc9f0",accent2:"#b388ff",good:"#3ddc97",warn:"#ffb454",bad:"#ff5d73",muted:"#8a9bb4",dim:"#5e6e88"};
+const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const fmt=(x,d=1)=>{ if(!isFinite(x))return"—"; const f=Math.pow(10,d); return (Math.round(x*f)/f).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}); };
+const range1=n=>d3.range(1,n+1);
+
+/* ============================ MODELS (Producer A) ============================ */
+// Each returns a ProfileResult-shaped object: { sweep, current, metrics, diagnostics... }
+function buildResult(expId, params, timeOf, extra, source){
+  const t1 = timeOf(1);
+  const sweep = range1(MAXP).map(p=>{
+    const t = timeOf(p);
+    const sp = t1/t;
+    return { x:p, time:t, speedup:sp, efficiency:sp/p };
+  });
+  const cur = sweep[clamp(params.threads,1,MAXP)-1];
+  return Object.assign({
+    experimentId:expId, source:source||"model", referenceMachine:REF.id, params,
+    sweep, current:cur
+  }, extra(cur, sweep));
+}
+
+const SYNC = {
+  reduction:{label:"reduction", f:0.01, cont:0.0},
+  atomic:   {label:"atomic",    f:0.08, cont:0.5},
+  critical: {label:"critical",  f:0.30, cont:1.0},
+};
+const SCHED = { static:{label:"static"}, guided:{label:"guided"}, dynamic:{label:"dynamic"} };
+
+const Models = {
+  falseSharing(params){
+    const {threads, padded, intensity}=params;
+    const T1=1000, kCoh = padded?0:(20+intensity*20); // ms of coherence penalty per extra thread
+    const timeOf = p => T1/p + kCoh*(p-1) + 0.5;
+    return buildResult("falseSharing", params, timeOf, (cur,sw)=>{
+      const peak = sw.reduce((a,b)=>b.speedup>a.speedup?b:a, sw[0]);
+      const coh = kCoh*(cur.x-1), cohPct = coh/cur.time*100;
+      return { peak, coh, metrics:[
+        {k:"Wall time", v:fmt(cur.time,0)+" ms", tone:padded?"good":"bad"},
+        {k:"Speedup", v:fmt(cur.speedup,1)+"×", tone:cur.speedup>cur.x*0.7?"good":"bad"},
+        {k:"Efficiency", v:fmt(cur.efficiency*100,0)+"%", tone:cur.efficiency>0.7?"good":cur.efficiency>0.4?"warn":"bad"},
+        {k:"Coherence stall", v:fmt(cohPct,0)+"%", tone:cohPct<5?"good":cohPct<40?"warn":"bad"},
+        {k:"Peak speedup", v:fmt(peak.speedup,1)+"× @ "+peak.x+"t", tone:"accent"},
+      ]};
+    });
+  },
+  synchronization(params){
+    const {threads, mode}=params; const m=SYNC[mode], T1=1000, tcrit=0.5;
+    const timeOf = p => T1*((1-m.f)/p + m.f) + m.cont*(p-1)*tcrit;
+    return buildResult("synchronization", params, timeOf, (cur)=>{
+      const ceiling = 1/m.f;
+      return { ceiling, serialPct:m.f*100, metrics:[
+        {k:"Wall time", v:fmt(cur.time,0)+" ms", tone:mode==="reduction"?"good":mode==="atomic"?"warn":"bad"},
+        {k:"Speedup", v:fmt(cur.speedup,1)+"×", tone:cur.efficiency>0.7?"good":cur.efficiency>0.4?"warn":"bad"},
+        {k:"Efficiency", v:fmt(cur.efficiency*100,0)+"%", tone:cur.efficiency>0.7?"good":cur.efficiency>0.4?"warn":"bad"},
+        {k:"Serialized", v:fmt(m.f*100,0)+"%", tone:m.f<0.05?"good":m.f<0.15?"warn":"bad"},
+        {k:"Amdahl ceiling", v:fmt(ceiling,1)+"×", tone:"accent"},
+      ]};
+    });
+  },
+  bandwidth(params){
+    const {threads, ai}=params, T1=1000;
+    const bwEff = p => REF.BW_peak * p/(p+REF.p_half);
+    const timeOf = p => T1/(bwEff(p)/bwEff(1));
+    return buildResult("bandwidth", params, timeOf, (cur)=>{
+      const bw=bwEff(cur.x), util=bw/REF.BW_peak;
+      const gf=Math.min(REF.P_peak, ai*bw), ridge=REF.P_peak/REF.BW_peak;
+      const bound = ai<ridge ? "Memory" : "Compute";
+      return { bwEff, bw, util, gf, ridge, bound, metrics:[
+        {k:"Wall time", v:fmt(cur.time,0)+" ms", tone:"warn"},
+        {k:"Speedup", v:fmt(cur.speedup,1)+"×", tone:cur.efficiency>0.7?"good":cur.efficiency>0.4?"warn":"bad"},
+        {k:"Efficiency", v:fmt(cur.efficiency*100,0)+"%", tone:cur.efficiency>0.5?"warn":"bad"},
+        {k:"Achieved BW", v:fmt(bw,1)+" GB/s", tone:util>0.9?"bad":"warn"},
+        {k:"BW utilization", v:fmt(util*100,0)+"%", tone:util>0.9?"bad":util>0.7?"warn":"good"},
+        {k:"Performance", v:fmt(gf,0)+" GFLOP/s", tone:"accent"},
+        {k:"Bound by", v:bound, tone:bound==="Memory"?"bad":"good"},
+      ]};
+    });
+  },
+  imbalance(params){
+    const {threads, sched}=params, T1=1000;
+    const factor = (p)=> sched==="static" ? (2-1/p) : sched==="guided" ? (1+0.15*(1-1/p)) : 1.05;
+    const ovh = (p)=> sched==="dynamic"?0.4*p : sched==="guided"?0.18*p : 0;
+    const timeOf = p => (T1/p)*factor(p) + ovh(p);
+    return buildResult("imbalance", params, timeOf, (cur)=>{
+      const I=factor(cur.x), idlePct=(1-1/I)*100;
+      return { factor:I, idlePct, metrics:[
+        {k:"Wall time", v:fmt(cur.time,0)+" ms", tone:sched==="static"?"bad":"good"},
+        {k:"Speedup", v:fmt(cur.speedup,1)+"×", tone:cur.efficiency>0.7?"good":cur.efficiency>0.45?"warn":"bad"},
+        {k:"Efficiency", v:fmt(cur.efficiency*100,0)+"%", tone:cur.efficiency>0.7?"good":cur.efficiency>0.45?"warn":"bad"},
+        {k:"Imbalance factor", v:fmt(I,2)+"×", tone:I<1.1?"good":I<1.4?"warn":"bad"},
+        {k:"Cores idle", v:fmt(idlePct,0)+"%", tone:idlePct<10?"good":idlePct<30?"warn":"bad"},
+      ]};
+    });
+  }
+};
+
+/* ============================ EXPLANATIONS (deterministic) ============================ */
+const Explain = {
+  falseSharing(r){
+    const c=r.current, peak=r.peak, padded=r.params.padded;
+    if(padded) return {sev:"info",
+      what:`Padded: speedup reaches <b>${fmt(c.speedup,1)}×</b> at ${c.x} threads — close to the ideal ${c.x}×.`,
+      why:`Each thread's counter sits on its <b>own 64-byte cache line</b>, so a write by one core never invalidates another core's line. No coherence ping-pong.`,
+      how:`Already fixed. Turn padding <b>off</b> to watch false sharing wreck the same loop.`,
+      exp:`This <b>is</b> the target curve — near-linear scaling.`};
+    return {sev:"critical",
+      what:`Speedup peaks at only <b>${fmt(peak.speedup,1)}×</b> around ${peak.x} threads, then <b>falls to ${fmt(c.speedup,1)}×</b> at ${c.x}. Adding threads makes it slower.`,
+      why:`All ${c.x} counters share <b>one 64-byte cache line</b>. Every increment invalidates that line in every other core, so it ping-pongs across cores over the bus — coherence traffic grows ~linearly with thread count and now dominates (${fmt(r.coh,0)} ms of the ${fmt(c.time,0)} ms runtime).`,
+      how:`<b>Pad/align each thread's counter to its own cache line</b> (64-byte alignment, or per-thread padded struct). Flip "Pad to cache line".`,
+      exp:`Near-linear speedup restored (~${c.x}× at ${c.x} threads); coherence stall → ~0%.`};
+  },
+  synchronization(r){
+    const c=r.current, mode=r.params.mode;
+    if(mode==="reduction") return {sev:"info",
+      what:`Per-thread accumulation + one reduction scales to <b>${fmt(c.speedup,1)}×</b> (efficiency ${fmt(c.efficiency*100,0)}%).`,
+      why:`Threads sum into <b>private</b> partials with no shared writes in the hot loop; only a tiny <b>O(log p)</b> merge at the end is serial.`,
+      how:`Already the right pattern. Switch to <b>critical</b> or <b>atomic</b> to see synchronization bite.`,
+      exp:`This is the target — near-ideal scaling.`};
+    return {sev: mode==="critical"?"critical":"warn",
+      what:`Speedup stalls at <b>${fmt(c.speedup,1)}×</b> on ${c.x} threads and won't pass <b>${fmt(r.ceiling,1)}×</b> no matter how many you add.`,
+      why:`The <b>${mode}</b> update serializes the hot loop: ${fmt(r.serialPct,0)}% of the work runs one-thread-at-a-time, and <b>Amdahl's law</b> caps speedup at 1 / serial-fraction = ${fmt(r.ceiling,1)}×. Threads also queue for the lock, adding contention.`,
+      how:`Accumulate into <b>per-thread partials</b> and combine once at the end (reduction). Pick "reduction".`,
+      exp:`Serial fraction → ~1%, speedup tracks the near-ideal reduction curve (~${c.x}× achievable).`};
+  },
+  bandwidth(r){
+    const c=r.current;
+    if(r.bound==="Compute") return {sev:"info",
+      what:`At arithmetic intensity ${fmt(r.params.ai,2)} FLOP/byte the kernel is now <b>compute-bound</b>: ${fmt(r.gf,0)} GFLOP/s.`,
+      why:`Above the roofline ridge (AI > ${fmt(r.ridge,1)}), performance is limited by compute, not the memory bus — so extra threads help again.`,
+      how:`This is the goal of cache blocking / fusion: do more FLOPs per byte moved.`,
+      exp:`Operating point sits under the compute ceiling; scaling resumes.`};
+    return {sev:"critical",
+      what:`Speedup saturates near <b>${fmt(c.speedup,1)}×</b> and barely moves past ~${REF.p_half+1} threads — even with 24 cores available.`,
+      why:`The STREAM-triad is <b>memory-bound</b> (AI ${fmt(r.params.ai,2)} FLOP/byte, below the ridge ${fmt(r.ridge,1)}). DRAM bandwidth is <b>${fmt(r.util*100,0)}% saturated</b>; extra threads contend for the same bus instead of doing new work.`,
+      how:`Don't add threads — <b>raise arithmetic intensity</b> (cache blocking, loop fusion) or cut memory traffic. Drag "Arithmetic intensity" right to move the operating point.`,
+      exp:`The kernel's point on the roofline moves right toward the compute ceiling; >2× headroom unlocked.`};
+  },
+  imbalance(r){
+    const c=r.current, sched=r.params.sched;
+    if(sched==="dynamic") return {sev:"info",
+      what:`Dynamic scheduling reaches <b>${fmt(c.speedup,1)}×</b> (imbalance factor ${fmt(r.factor,2)}, only ${fmt(r.idlePct,0)}% idle).`,
+      why:`Chunks are handed out on demand, so a thread that finishes early <b>steals</b> more work instead of idling. Load stays even.`,
+      how:`Already balanced. Switch to <b>static</b> to see idle cores.`,
+      exp:`This is the target — cores stay busy until the end.`};
+    return {sev: sched==="static"?"critical":"warn",
+      what:`Speedup stuck at <b>${fmt(c.speedup,1)}×</b> on ${c.x} threads; <b>${fmt(r.idlePct,0)}% of core-time is idle</b>.`,
+      why:`The triangular loop with <b>${sched}</b> scheduling gives early threads little work and late threads a lot. Total time = the <b>slowest</b> thread (imbalance factor ${fmt(r.factor,2)}×), so finished cores sit idle waiting.`,
+      how:`Use <b>schedule(dynamic)</b> or <b>guided</b> so idle threads grab remaining chunks.`,
+      exp:`Imbalance factor → ~1.05, idle time → near 0, speedup approaches ${c.x}×.`};
+  }
+};
+
+/* ===================== MEASURED (Producer B — real WSL runs) ===================== */
+// Same downstream as the model: build a result from REAL sweep times, derive everything.
+function runnerSpec(exp, p){
+  if(exp==="falseSharing")    return {bexp:"falsesharing", variant:p.padded?"padded":"shared"};
+  if(exp==="synchronization") return {bexp:"sync",         variant:p.mode};
+  if(exp==="bandwidth")       return {bexp:"bandwidth",     variant:"triad"};
+  return {bexp:"imbalance", variant:p.sched};
+}
+async function fetchRun(bexp, variant){
+  const r = await fetch(`${RUNNER}/run?exp=${bexp}&variant=${variant}&maxthreads=${MAXP}`, {cache:"no-store"});
+  const j = await r.json();
+  if(!r.ok || j.error) throw new Error(j.error || ("HTTP "+r.status));
+  return j;
+}
+const tLookup = data => p => data.points[clamp(p,1,data.points.length)-1].ms;
+
+const Measured = {
+  falseSharing(params, data){
+    return buildResult("falseSharing", params, tLookup(data), (cur,sw)=>{
+      const peak=sw.reduce((a,b)=>b.speedup>a.speedup?b:a,sw[0]), loss=(1-cur.efficiency)*100;
+      return { peak, coh:0, metrics:[
+        {k:"Wall time", v:fmt(cur.time,0)+" ms", tone:params.padded?"good":"bad"},
+        {k:"Speedup", v:fmt(cur.speedup,1)+"×", tone:cur.efficiency>0.6?"good":cur.efficiency>0.35?"warn":"bad"},
+        {k:"Efficiency", v:fmt(cur.efficiency*100,0)+"%", tone:cur.efficiency>0.6?"good":cur.efficiency>0.35?"warn":"bad"},
+        {k:"Cores wasted", v:fmt(loss,0)+"%", tone:loss<25?"good":loss<55?"warn":"bad"},
+        {k:"Peak speedup", v:fmt(peak.speedup,1)+"× @ "+peak.x+"t", tone:"accent"},
+      ]};
+    }, "measured");
+  },
+  synchronization(params, data){
+    return buildResult("synchronization", params, tLookup(data), (cur,sw)=>{
+      const fastest=sw.reduce((a,b)=>b.time<a.time?b:a,sw[0]);
+      return { metrics:[
+        {k:"Wall time", v:fmt(cur.time,0)+" ms", tone:params.mode==="reduction"?"good":"bad"},
+        {k:"Speedup", v:fmt(cur.speedup,2)+"×", tone:cur.efficiency>0.55?"good":cur.speedup>=1?"warn":"bad"},
+        {k:"Efficiency", v:fmt(cur.efficiency*100,0)+"%", tone:cur.efficiency>0.55?"good":cur.efficiency>0.25?"warn":"bad"},
+        {k:"Fastest at", v:fastest.x+" thread"+(fastest.x>1?"s":""), tone:fastest.x>=12?"good":"bad"},
+      ]};
+    }, "measured");
+  },
+  bandwidth(params, data){
+    const mp=Object.assign({}, params, {ai:TRIAD_AI});
+    return buildResult("bandwidth", mp, tLookup(data), (cur,sw)=>{
+      const pt=data.points[clamp(cur.x,1,data.points.length)-1];
+      const peakBW=Math.max.apply(null, data.points.map(p=>p.gbps||0));
+      const peakSp=sw.reduce((a,b)=>Math.max(a,b.speedup),0);
+      const sat=(sw.find(s=>s.speedup>=0.95*peakSp)||{x:cur.x}).x;
+      const bw=pt.gbps, gf=pt.gflops, util=peakBW?bw/peakBW:0;
+      return { bw, gf, util, peakBW, peakCompute:REF.P_peak, ridge:REF.P_peak/(peakBW||REF.BW_peak),
+               peakSpeedup:peakSp, satThreads:sat, bound:"Memory", metrics:[
+        {k:"Wall time", v:fmt(cur.time,0)+" ms", tone:"warn"},
+        {k:"Speedup", v:fmt(cur.speedup,1)+"×", tone:cur.x>8&&cur.speedup>peakSp*0.9?"bad":"warn"},
+        {k:"Efficiency", v:fmt(cur.efficiency*100,0)+"%", tone:"bad"},
+        {k:"Achieved BW", v:fmt(bw,1)+" GB/s", tone:util>0.9?"bad":"warn"},
+        {k:"BW utilization", v:fmt(util*100,0)+"%", tone:util>0.9?"bad":util>0.7?"warn":"good"},
+        {k:"Performance", v:fmt(gf,2)+" GFLOP/s", tone:"accent"},
+        {k:"Peak BW (meas.)", v:fmt(peakBW,1)+" GB/s", tone:"accent"},
+      ]};
+    }, "measured");
+  },
+  imbalance(params, data){
+    return buildResult("imbalance", params, tLookup(data), (cur,sw)=>{
+      const factor=cur.efficiency>0?1/cur.efficiency:99, idle=(1-cur.efficiency)*100;
+      return { factor, idlePct:idle, metrics:[
+        {k:"Wall time", v:fmt(cur.time,0)+" ms", tone:params.sched==="static"?"bad":"good"},
+        {k:"Speedup", v:fmt(cur.speedup,1)+"×", tone:cur.efficiency>0.55?"good":cur.efficiency>0.3?"warn":"bad"},
+        {k:"Efficiency", v:fmt(cur.efficiency*100,0)+"%", tone:cur.efficiency>0.55?"good":cur.efficiency>0.3?"warn":"bad"},
+        {k:"Imbalance factor", v:fmt(factor,2)+"×", tone:factor<1.4?"good":factor<2.5?"warn":"bad"},
+        {k:"Cores idle", v:fmt(idle,0)+"%", tone:idle<25?"good":idle<55?"warn":"bad"},
+      ]};
+    }, "measured");
+  }
+};
+
+const ExplainMeasured = {
+  falseSharing(r){
+    const c=r.current, eff=c.efficiency*100, loss=100-eff;
+    if(r.params.padded) return {sev: eff>55?"info":"warn",
+      what:`Measured on your 24 cores: the <b>padded</b> layout reaches <b>${fmt(c.speedup,1)}×</b> at ${c.x} threads (${fmt(eff,0)}% efficiency).`,
+      why:`Each thread's counter has its <b>own 64-byte cache line</b> (stride 8), so cores never invalidate one another — the loop scales close to linear.`,
+      how:`This is the good layout. Toggle padding <b>off</b> to measure the false-sharing penalty on this exact CPU.`,
+      exp:`Compare against the shared layout: identical work, far less speedup.`};
+    return {sev:"critical",
+      what:`Measured: the <b>shared</b> layout reaches only <b>${fmt(c.speedup,1)}×</b> at ${c.x} threads — ${fmt(eff,0)}% efficiency, so <b>~${fmt(loss,0)}% of your cores are wasted</b>.`,
+      why:`All threads' counters pack into the <b>same cache line(s)</b>. Every write invalidates the line in the other cores, so it ping-pongs over the coherence fabric — pure overhead, no extra work done.`,
+      how:`<b>Pad each counter to its own 64-byte line.</b> Flip "Pad to cache line" — same code, just the index stride changes.`,
+      exp:`On this machine padding lifts the same loop to a markedly higher speedup — toggle it and watch the curve.`};
+  },
+  synchronization(r){
+    const c=r.current, mode=r.params.mode, eff=c.efficiency*100, slower=c.speedup<1;
+    if(mode==="reduction") return {sev: eff>50?"info":"warn",
+      what:`Measured: per-thread + reduction reaches <b>${fmt(c.speedup,1)}×</b> on ${c.x} cores (${fmt(eff,0)}% efficiency).`,
+      why:`Threads sum into <b>private partials</b> — no shared writes in the hot loop, just one O(log p) merge. It scales until memory bandwidth becomes the limit.`,
+      how:`This is the right pattern. Switch to <b>critical</b> or <b>atomic</b> to measure the synchronization tax.`,
+      exp:`The lock-based strategies fall far short of this on the same cores.`};
+    return {sev:"critical",
+      what: slower
+        ? `Measured: <b>${mode}</b> gets <b>SLOWER</b> as you add cores — ${fmt(c.speedup,2)}× at ${c.x} threads (≈ ${fmt(1/c.speedup,1)}× slower than a single thread!).`
+        : `Measured: <b>${mode}</b> stalls at <b>${fmt(c.speedup,1)}×</b> on ${c.x} cores (${fmt(eff,0)}% efficiency).`,
+      why:`Every iteration takes the <b>${mode}</b> lock, so the hot loop runs one-thread-at-a-time and threads queue for it. More cores add contention, not throughput.`,
+      how:`Accumulate into <b>per-thread partials</b> and combine once (reduction). Pick "reduction".`,
+      exp:`Reduction removes the shared write — measure it jump to many× on the very same cores.`};
+  },
+  bandwidth(r){
+    const c=r.current;
+    return {sev:"critical",
+      what:`Measured: the triad saturates at <b>${fmt(c.speedup,1)}×</b> (peak ${fmt(r.peakSpeedup,1)}×) and plateaus by ~${r.satThreads} threads — your 24 cores can't push past it.`,
+      why:`The STREAM-triad is <b>memory-bound</b>. It hits <b>${fmt(r.bw,1)} GB/s</b> = ${fmt(r.util*100,0)}% of this laptop's measured DRAM ceiling (<b>${fmt(r.peakBW,1)} GB/s</b>). Past saturation, extra threads just wait on the bus.`,
+      how:`Don't add threads — <b>raise arithmetic intensity</b> (cache blocking / fusion) so each byte moved does more FLOPs.`,
+      exp:`Higher AI lifts the kernel off the memory roofline; until then bandwidth is the hard wall.`};
+  },
+  imbalance(r){
+    const c=r.current, sched=r.params.sched, eff=c.efficiency*100;
+    if(sched!=="static") return {sev: eff>50?"info":"warn",
+      what:`Measured: <b>${sched}</b> scheduling reaches <b>${fmt(c.speedup,1)}×</b> on ${c.x} cores (${fmt(eff,0)}% efficiency, imbalance ${fmt(r.factor,2)}×).`,
+      why:`Chunks are handed out on demand, so threads that finish early <b>steal</b> remaining rows instead of idling.`,
+      how:`Good. Switch to <b>static</b> to measure the idle-core penalty of the triangular loop.`,
+      exp:`Static overloads late-indexed threads while the rest sit idle.`};
+    return {sev:"critical",
+      what:`Measured: <b>static</b> scheduling reaches only <b>${fmt(c.speedup,1)}×</b> on ${c.x} cores (${fmt(eff,0)}% efficiency), imbalance factor ${fmt(r.factor,2)}×.`,
+      why:`The triangular loop gives late-indexed threads far more work; with fixed static chunks they finish last while early threads idle. Total time = the slowest thread.`,
+      how:`Use <b>schedule(dynamic)</b> or <b>guided</b> so idle threads grab the remaining rows.`,
+      exp:`Dynamic rebalances the load — measure the speedup climb on the same cores.`};
+  }
+};
+
+/* ============================ CONTROLS ============================ */
+const EXPERIMENTS = [
+  {id:"falseSharing",   name:"False Sharing",      scene:"cache lines · coherence ping-pong"},
+  {id:"synchronization",name:"Synchronization",    scene:"thread timeline · lock serialization"},
+  {id:"bandwidth",      name:"Bandwidth Saturation",scene:"memory bus · roofline"},
+  {id:"imbalance",      name:"Load Imbalance",      scene:"thread timeline · idle tails"},
+];
+const state = {
+  exp:"falseSharing",
+  mode:"model",                    // "model" (Producer A) | "measured" (Producer B / WSL runner)
+  params:{
+    falseSharing:{threads:24, padded:false, intensity:1},
+    synchronization:{threads:24, mode:"critical"},
+    bandwidth:{threads:24, ai:0.1},
+    imbalance:{threads:24, sched:"static"},
+  }
+};
+let lastRes = null;
+const RUNNER = "http://localhost:8099";   // local WSL measurement runner
+const TRIAD_AI = 2/24;                     // triad: 2 FLOPs per 24 bytes moved
+let runnerOk = false;
+const measuredCache = {};                  // bexp/variant -> runner payload
+
+function sliderRow(label, valueText, min, max, step, val, on){
+  const wrap=document.createElement("div"); wrap.className="ctrl";
+  wrap.innerHTML=`<label>${label}<b data-v>${valueText}</b></label>`;
+  const inp=document.createElement("input"); inp.type="range";
+  inp.min=min; inp.max=max; inp.step=step; inp.value=val;
+  inp.addEventListener("input",()=>on(parseFloat(inp.value), wrap.querySelector("[data-v]")));
+  wrap.appendChild(inp); return wrap;
+}
+function segRow(label, opts, current, fix, on){
+  const wrap=document.createElement("div"); wrap.className="ctrl";
+  wrap.innerHTML=`<label>${label}</label>`;
+  const seg=document.createElement("div"); seg.className="seg"+(fix?" fix":"");
+  opts.forEach(o=>{ const b=document.createElement("button"); b.textContent=o.label; b.dataset.k=o.k;
+    if(o.k===current)b.classList.add("on");
+    b.addEventListener("click",()=>{ seg.querySelectorAll("button").forEach(x=>x.classList.remove("on")); b.classList.add("on"); on(o.k); });
+    seg.appendChild(b);});
+  wrap.appendChild(seg); return wrap;
+}
+function buildControls(){
+  const host=document.getElementById("controlBody"); host.innerHTML="";
+  const p=state.params[state.exp];
+  const measured=state.mode==="measured";
+  host.appendChild(sliderRow("Threads","<b>"+p.threads+"</b>",1,MAXP,1,p.threads,(v,el)=>{p.threads=v; el.innerHTML="<b>"+v+"</b>"; recompute();}));
+  if(state.exp==="falseSharing"){
+    const t=document.createElement("div"); t.className="ctrl";
+    t.innerHTML=`<label>Pad to cache line<span style="font-family:var(--mono);color:var(--good)">${p.padded?"FIXED":"off"}</span></label>`;
+    const tog=document.createElement("div"); tog.className="toggle"+(p.padded?" on":"");
+    tog.innerHTML=`<div class="track"><div class="knob"></div></div><span style="font-size:12px;color:var(--muted)">align each counter to 64 B</span>`;
+    tog.addEventListener("click",()=>{p.padded=!p.padded; recompute(); buildControls();});
+    t.appendChild(tog);
+    const h=document.createElement("div"); h.className="fixhint"; h.textContent="The fix: give every thread its own cache line so writes stop invalidating each other.";
+    t.appendChild(h); host.appendChild(t);
+    if(!measured) host.appendChild(sliderRow("Write intensity","×"+fmt(p.intensity,1),0.5,2,0.1,p.intensity,(v,el)=>{p.intensity=v; el.textContent="×"+fmt(v,1); recompute();}));
+  }
+  if(state.exp==="synchronization"){
+    host.appendChild(segRow("Accumulation strategy",[{k:"critical",label:"critical"},{k:"atomic",label:"atomic"},{k:"reduction",label:"reduction ✓"}],p.mode,true,(k)=>{p.mode=k; recompute();}));
+    const h=document.createElement("div"); h.className="fixhint"; h.textContent="The fix: reduction — sum into private partials, combine once at the end.";
+    host.appendChild(h);
+  }
+  if(state.exp==="bandwidth"){
+    if(!measured){
+      host.appendChild(sliderRow("Arithmetic intensity","<b>"+fmt(p.ai,2)+"</b> F/B",0.03,8,0.01,p.ai,(v,el)=>{p.ai=v; el.innerHTML="<b>"+fmt(v,2)+"</b> F/B"; recompute();}));
+      const h=document.createElement("div"); h.className="fixhint"; h.textContent="The fix: raise arithmetic intensity (FLOPs per byte) to climb off the memory ceiling.";
+      host.appendChild(h);
+    } else {
+      const h=document.createElement("div"); h.className="fixhint";
+      h.innerHTML="Arithmetic intensity is fixed by the real triad kernel (~"+fmt(TRIAD_AI,2)+" F/B). Here the lesson is the <b>measured saturation</b>, not a what-if.";
+      host.appendChild(h);
+    }
+  }
+  if(state.exp==="imbalance"){
+    host.appendChild(segRow("OpenMP schedule",[{k:"static",label:"static"},{k:"guided",label:"guided"},{k:"dynamic",label:"dynamic ✓"}],p.sched,true,(k)=>{p.sched=k; recompute();}));
+    const h=document.createElement("div"); h.className="fixhint"; h.textContent="The fix: dynamic/guided scheduling lets idle threads steal remaining work.";
+    host.appendChild(h);
+  }
+}
+
+/* ============================ METRICS + EXPLANATION RENDER ============================ */
+function renderMetrics(res){
+  const cur=res.current;
+  document.getElementById("heroBig").textContent=fmt(cur.speedup,1)+"×";
+  document.getElementById("heroBig").className="big "+(cur.efficiency>0.7?"":cur.efficiency>0.4?"":"");
+  document.getElementById("heroBig").style.color = cur.efficiency>0.7?C.good:cur.efficiency>0.4?C.warn:C.bad;
+  document.getElementById("heroCap").textContent="speedup on "+cur.x+" of 24 cores";
+  const host=document.getElementById("metrics"); host.innerHTML="";
+  res.metrics.forEach(m=>{ const row=document.createElement("div"); row.className="metric";
+    row.innerHTML=`<span class="k">${m.k}</span><span class="v ${m.tone||""}">${m.v}</span>`; host.appendChild(row); });
+}
+function renderExplain(res){
+  const E = state.mode==="measured" ? ExplainMeasured : Explain;
+  const e=E[state.exp](res);
+  document.getElementById("exWhat").innerHTML=e.what;
+  document.getElementById("exWhy").innerHTML=e.why;
+  document.getElementById("exHow").innerHTML=e.how;
+  document.getElementById("exExp").innerHTML=e.exp;
+  const sev=document.getElementById("sev"); sev.textContent=e.sev; sev.className="sev "+e.sev;
+}
+
+/* ============================ CHARTS (D3) ============================ */
+function drawScaling(res){
+  const svg=d3.select("#scalingChart"); svg.selectAll("*").remove();
+  const W=svg.node().clientWidth||560, H=260, m={t:14,r:44,b:34,l:38};
+  const x=d3.scaleLinear().domain([1,MAXP]).range([m.l,W-m.r]);
+  const y=d3.scaleLinear().domain([0,MAXP]).range([H-m.b,m.t]);
+  const ye=d3.scaleLinear().domain([0,1]).range([H-m.b,m.t]);
+  // gridlines
+  svg.append("g").selectAll("line").data(y.ticks(6)).join("line")
+    .attr("class","grid-line").attr("x1",m.l).attr("x2",W-m.r).attr("y1",d=>y(d)).attr("y2",d=>y(d));
+  // ideal
+  svg.append("line").attr("x1",x(1)).attr("y1",y(1)).attr("x2",x(MAXP)).attr("y2",y(MAXP))
+    .attr("stroke","#33405a").attr("stroke-width",2).attr("stroke-dasharray","5 5");
+  const sw=res.sweep;
+  const lineSp=d3.line().x(d=>x(d.x)).y(d=>y(d.speedup)).curve(d3.curveMonotoneX);
+  const lineEf=d3.line().x(d=>x(d.x)).y(d=>ye(d.efficiency)).curve(d3.curveMonotoneX);
+  svg.append("path").datum(sw).attr("fill","none").attr("stroke",C.accent2).attr("stroke-width",1.5).attr("opacity",.7).attr("d",lineEf);
+  svg.append("path").datum(sw).attr("fill","none").attr("stroke",C.accent).attr("stroke-width",2.5).attr("d",lineSp);
+  // current marker
+  const cur=res.current;
+  svg.append("line").attr("x1",x(cur.x)).attr("x2",x(cur.x)).attr("y1",m.t).attr("y2",H-m.b).attr("stroke","#2a3850").attr("stroke-dasharray","3 3");
+  svg.append("circle").attr("cx",x(cur.x)).attr("cy",y(cur.speedup)).attr("r",5).attr("fill",C.accent).attr("stroke","#04121a").attr("stroke-width",2);
+  // axes
+  svg.append("g").attr("class","axis").attr("transform",`translate(0,${H-m.b})`).call(d3.axisBottom(x).ticks(6).tickFormat(d3.format("d")));
+  svg.append("g").attr("class","axis").attr("transform",`translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5));
+  svg.append("g").attr("class","axis").attr("transform",`translate(${W-m.r},0)`).call(d3.axisRight(ye).ticks(4).tickFormat(d3.format(".0%")));
+}
+function drawRoofline(res){
+  const box=document.getElementById("rooflineBox");
+  if(state.exp!=="bandwidth"){ box.style.display="none"; document.getElementById("chartRow").classList.remove("two"); return; }
+  box.style.display=""; document.getElementById("chartRow").classList.add("two");
+  const svg=d3.select("#rooflineChart"); svg.selectAll("*").remove();
+  const W=svg.node().clientWidth||560, H=260, m={t:14,r:16,b:34,l:46};
+  const BWp=res.peakBW||REF.BW_peak, Pp=res.peakCompute||REF.P_peak;
+  const x=d3.scaleLog().domain([0.03,100]).range([m.l,W-m.r]);
+  const y=d3.scaleLog().domain([1,Pp*1.2]).range([H-m.b,m.t]);
+  svg.append("g").selectAll("line").data(x.ticks(6)).join("line").attr("class","grid-line")
+    .attr("x1",d=>x(d)).attr("x2",d=>x(d)).attr("y1",m.t).attr("y2",H-m.b);
+  // ceilings
+  const ridge=Pp/BWp;
+  const memLine=[[0.03, 0.03*BWp],[ridge, Pp]];
+  const cmpLine=[[ridge, Pp],[100, Pp]];
+  const ln=d3.line().x(d=>x(d[0])).y(d=>y(d[1]));
+  svg.append("path").datum(memLine).attr("fill","none").attr("stroke",C.bad).attr("stroke-width",2).attr("d",ln);
+  svg.append("path").datum(cmpLine).attr("fill","none").attr("stroke",C.warn).attr("stroke-width",2).attr("d",ln);
+  // operating point
+  const ai=res.params.ai, gf=res.gf;
+  svg.append("line").attr("x1",x(ai)).attr("x2",x(ai)).attr("y1",y(gf)).attr("y2",H-m.b).attr("stroke","#2a3850").attr("stroke-dasharray","3 3");
+  svg.append("circle").attr("cx",x(ai)).attr("cy",y(gf)).attr("r",6).attr("fill",C.accent).attr("stroke","#04121a").attr("stroke-width",2);
+  svg.append("text").attr("x",x(ai)+9).attr("y",y(gf)-6).attr("fill",C.accent).attr("font-size",11).attr("font-family","ui-monospace, monospace").text(fmt(gf,0)+" GF/s");
+  svg.append("text").attr("x",x(ridge)).attr("y",m.t+10).attr("fill",C.dim).attr("font-size",10).attr("text-anchor","middle").text("ridge");
+  svg.append("g").attr("class","axis").attr("transform",`translate(0,${H-m.b})`).call(d3.axisBottom(x).ticks(5,"~g"));
+  svg.append("g").attr("class","axis").attr("transform",`translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4,"~g"));
+  svg.append("text").attr("x",(W)/2).attr("y",H-4).attr("fill",C.dim).attr("font-size",10).attr("text-anchor","middle").text("arithmetic intensity (FLOP/byte)");
+}
+
+/* ============================ VISUALIZATION (Canvas 2D) ============================ */
+const cv=document.getElementById("viz"); const ctx=cv.getContext("2d"); let VW=0,VH=0;
+function resizeCanvas(){ const r=cv.getBoundingClientRect(); const dpr=window.devicePixelRatio||1;
+  cv.width=Math.max(1,r.width*dpr); cv.height=Math.max(1,r.height*dpr); ctx.setTransform(dpr,0,0,dpr,0,0); VW=r.width; VH=r.height; }
+window.addEventListener("resize",()=>{resizeCanvas(); if(reduceMotion&&lastRes)Viz.frame(performance.now());});
+function rr(x,y,w,h,r){ r=Math.min(r,h/2,w/2); ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function chip(x,y,w,h,label,color,glow){ ctx.save(); if(glow){ctx.shadowColor=color;ctx.shadowBlur=glow;} rr(x,y,w,h,8); ctx.fillStyle="#0c1320"; ctx.fill(); ctx.shadowBlur=0; ctx.lineWidth=1.5; ctx.strokeStyle=color; ctx.stroke(); ctx.fillStyle=color; ctx.font="600 11px ui-monospace, monospace"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(label,x+w/2,y+h/2); ctx.restore(); }
+
+const Viz = {
+  frame(now){
+    ctx.clearRect(0,0,VW,VH);
+    if(!lastRes) return;
+    const fn=this[state.exp]; if(fn) fn.call(this, now, lastRes);
+  },
+  falseSharing(now,res){
+    const p=res.params.threads, padded=res.params.padded;
+    const n=Math.min(p,16); // draw up to 16 cores for clarity
+    const pad=22, topY=pad, coreW=Math.min(64,(VW-pad*2)/n-8), coreH=34, gap=(VW-pad*2-coreW*n)/(n-1||1);
+    // cores
+    for(let i=0;i<n;i++){ const cx=pad+i*(coreW+gap);
+      let active=false, col="#33405a";
+      if(!padded){ const owner=Math.floor(now/360)%n; active=(i===owner); col=active?C.bad:"#33405a"; }
+      else { col=C.good; active=(Math.floor(now/700)%n===i); }
+      chip(cx,topY,coreW,coreH,"C"+i, col, active?16:0);
+      // line from core down to its cache line
+      ctx.strokeStyle=active?col:"#16202f"; ctx.lineWidth=active?2:1;
+      ctx.beginPath(); ctx.moveTo(cx+coreW/2,topY+coreH); ctx.lineTo(cx+coreW/2, topY+coreH+26); ctx.stroke();
+    }
+    const lineY=topY+coreH+30, lineH=46;
+    if(!padded){
+      // one shared cache line with n cells
+      const lw=VW-pad*2; rr(pad,lineY,lw,lineH,10); ctx.fillStyle="#0a0f18"; ctx.fill();
+      ctx.lineWidth=2; ctx.strokeStyle=C.bad; ctx.shadowColor=C.bad; ctx.shadowBlur=18; ctx.stroke(); ctx.shadowBlur=0;
+      const cellW=lw/n; const owner=Math.floor(now/360)%n;
+      for(let i=0;i<n;i++){ const flash=(i===owner)?(0.5+0.5*Math.sin(now/80)):0.12;
+        ctx.fillStyle=`rgba(255,93,115,${flash})`; rr(pad+i*cellW+2,lineY+6,cellW-4,lineH-12,5); ctx.fill();
+        ctx.fillStyle="#9fb0c8"; ctx.font="9px ui-monospace, monospace"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText("c"+i,pad+i*cellW+cellW/2,lineY+lineH/2);
+      }
+      ctx.fillStyle=C.bad; ctx.font="600 12px system-ui, sans-serif"; ctx.textAlign="center";
+      ctx.fillText("ONE 64-byte cache line — invalidated on every write → ping-pongs across cores", VW/2, lineY+lineH+22);
+      // bus contention particles
+      const m=lineY+lineH+40;
+      for(let k=0;k<n;k++){ const ph=(now/600+k/n)%1; const px=pad+ph*(VW-pad*2);
+        ctx.fillStyle="rgba(255,93,115,.8)"; ctx.beginPath(); ctx.arc(px,m+14,3,0,7); ctx.fill(); }
+      ctx.fillStyle=C.dim; ctx.font="10px ui-monospace, monospace"; ctx.textAlign="left"; ctx.fillText("coherence bus traffic ↑ with thread count", pad, m+34);
+    } else {
+      // separate cache lines, one per core
+      const lw=(VW-pad*2)/n;
+      for(let i=0;i<n;i++){ const lx=pad+i*lw+3, w=lw-6;
+        rr(lx,lineY,w,lineH,8); ctx.fillStyle="#0a0f18"; ctx.fill();
+        ctx.lineWidth=1.5; ctx.strokeStyle=C.good; ctx.stroke();
+        const pulse=0.25+0.2*Math.sin(now/300+i); ctx.fillStyle=`rgba(61,220,151,${pulse})`; rr(lx+3,lineY+6,w-6,lineH-12,5); ctx.fill();
+        ctx.fillStyle="#9fb0c8"; ctx.font="9px ui-monospace, monospace"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText("c"+i,lx+w/2,lineY+lineH/2);
+      }
+      ctx.fillStyle=C.good; ctx.font="600 12px system-ui, sans-serif"; ctx.textAlign="center";
+      ctx.fillText("Each counter on its OWN cache line — no cross-core invalidation", VW/2, lineY+lineH+22);
+    }
+  },
+  synchronization(now,res){
+    const p=res.params.threads, mode=res.params.mode, m=SYNC[mode];
+    const n=Math.min(p,16), pad=20, top=14, rowH=Math.min(26,(VH-70)/n), gapY=4;
+    const T1=1000, parallel=T1*(1-m.f)/p, per=T1*m.f/p, total=parallel+T1*m.f;
+    const x0=pad+34, x1=VW-pad, scale=(x1-x0)/total;
+    const play=((now/2200)%1)*total;
+    for(let i=0;i<n;i++){ const y=top+i*(rowH+gapY);
+      ctx.fillStyle="#7c8aa3"; ctx.font="10px ui-monospace, monospace"; ctx.textAlign="right"; ctx.textBaseline="middle"; ctx.fillText("T"+i,x0-6,y+rowH/2);
+      // track
+      rr(x0,y,(x1-x0),rowH,5); ctx.fillStyle="#0a0f18"; ctx.fill();
+      // compute segment
+      const cEnd=Math.min(play,parallel); if(cEnd>0){ rr(x0,y,cEnd*scale,rowH,5); ctx.fillStyle="rgba(76,201,240,.85)"; ctx.fill(); }
+      // wait (between own compute and own crit slot)
+      const critStart=parallel+i*per, critEnd=critStart+per;
+      if(play>parallel){ const ws=parallel, we=Math.min(play,critStart);
+        if(we>ws){ ctx.fillStyle="rgba(120,140,170,.18)"; ctx.fillRect(x0+ws*scale,y+2,(we-ws)*scale,rowH-4);
+          // hatch
+          ctx.strokeStyle="rgba(138,155,180,.25)"; ctx.lineWidth=1; for(let hx=ws;hx<we;hx+=8){ctx.beginPath();ctx.moveTo(x0+hx*scale,y+2);ctx.lineTo(x0+hx*scale+6,y+rowH-2);ctx.stroke();} }
+      }
+      // crit segment
+      if(play>critStart){ const ce=Math.min(play,critEnd); rr(x0+critStart*scale,y, (ce-critStart)*scale, rowH,4); ctx.fillStyle=mode==="reduction"?"rgba(61,220,151,.9)":"rgba(255,180,84,.95)"; ctx.fill(); }
+    }
+    // playhead
+    ctx.strokeStyle="rgba(230,237,243,.5)"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(x0+play*scale,top-2); ctx.lineTo(x0+play*scale, top+n*(rowH+gapY)); ctx.stroke();
+    // legend
+    const ly=top+n*(rowH+gapY)+14; ctx.textAlign="left"; ctx.font="10px system-ui, sans-serif";
+    ctx.fillStyle="rgba(76,201,240,.85)"; ctx.fillRect(x0,ly,12,8); ctx.fillStyle=C.muted; ctx.fillText("parallel compute",x0+16,ly+8);
+    ctx.fillStyle="rgba(120,140,170,.4)"; ctx.fillRect(x0+130,ly,12,8); ctx.fillStyle=C.muted; ctx.fillText("waiting for lock",x0+146,ly+8);
+    ctx.fillStyle=mode==="reduction"?"rgba(61,220,151,.9)":"rgba(255,180,84,.95)"; ctx.fillRect(x0+260,ly,12,8); ctx.fillStyle=C.muted; ctx.fillText(mode==="reduction"?"merge":mode+" (serialized)",x0+276,ly+8);
+  },
+  bandwidth(now,res){
+    const p=res.params.threads, util=res.util, n=Math.min(p,16);
+    const pad=24, busY=VH*0.46, busH=46, x0=pad+70, x1=VW-pad-90;
+    // thread emitters
+    for(let i=0;i<n;i++){ const ty=30+i*((busY-50)/Math.max(1,n-1)); }
+    const left=pad, rowSpan=VH-60;
+    for(let i=0;i<n;i++){ const ty=24+i*((VH-90)/Math.max(1,n));
+      chip(left,ty,34,16,"t"+i, util>0.9?C.bad:C.accent, 0);
+      ctx.strokeStyle=util>0.92?"rgba(255,93,115,.5)":"rgba(76,201,240,.45)"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(left+34,ty+8); ctx.lineTo(x0,busY+busH/2); ctx.stroke();
+    }
+    // the bus pipe (capacity = BW_peak)
+    rr(x0,busY,x1-x0,busH,12); ctx.fillStyle="#0a0f18"; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle="#22324a"; ctx.stroke();
+    const fillW=(x1-x0)*util; const col=util>0.92?C.bad:util>0.7?C.warn:C.good;
+    rr(x0,busY,fillW,busH,12); ctx.fillStyle=col; ctx.globalAlpha=.28; ctx.fill(); ctx.globalAlpha=1;
+    // flowing dashes
+    const speed=Math.min(util,1); ctx.strokeStyle=col; ctx.lineWidth=3; ctx.setLineDash([12,14]); ctx.lineDashOffset=-(now*0.06*speed)%26;
+    ctx.beginPath(); ctx.moveTo(x0+6,busY+busH/2); ctx.lineTo(x0+Math.max(10,fillW-6),busY+busH/2); ctx.stroke(); ctx.setLineDash([]);
+    // capacity label
+    ctx.fillStyle=C.muted; ctx.font="10px ui-monospace, monospace"; ctx.textAlign="left"; ctx.fillText("DRAM bus capacity "+(res.peakBW?fmt(res.peakBW,0):REF.BW_peak)+" GB/s",x0,busY-8);
+    // readout
+    ctx.textAlign="right"; ctx.fillStyle=col; ctx.font="700 22px ui-monospace, monospace"; ctx.fillText(fmt(res.bw,1),x1+86,busY+18);
+    ctx.fillStyle=C.muted; ctx.font="10px ui-monospace, monospace"; ctx.fillText("GB/s · "+fmt(util*100,0)+"%",x1+86,busY+34);
+    // saturation note
+    if(util>0.9){ ctx.fillStyle=C.bad; ctx.font="600 12px system-ui, sans-serif"; ctx.textAlign="center"; ctx.fillText("BUS SATURATED — extra threads stall waiting for memory", VW/2, busY+busH+30); }
+    else { ctx.fillStyle=C.good; ctx.font="600 12px system-ui, sans-serif"; ctx.textAlign="center"; ctx.fillText("bandwidth headroom remains", VW/2, busY+busH+30); }
+  },
+  imbalance(now,res){
+    const p=res.params.threads, sched=res.params.sched;
+    const n=Math.min(p,16), pad=20, top=14, rowH=Math.min(26,(VH-70)/n), gapY=4, T1=1000;
+    // per-thread busy times
+    let work;
+    if(sched==="static"){ const w=d3.range(n).map(t=>2*t+1); const s=w.reduce((a,b)=>a+b,0); work=w.map(v=>T1*v/s); }
+    else { const jit=sched==="guided"?0.12:0.04, base=T1/n; work=d3.range(n).map(t=>base*(1+jit*Math.sin(t*1.7))); }
+    const wall=Math.max.apply(null,work);
+    const x0=pad+34, x1=VW-pad, scale=(x1-x0)/wall;
+    const play=((now/2200)%1)*wall;
+    for(let i=0;i<n;i++){ const y=top+i*(rowH+gapY);
+      ctx.fillStyle="#7c8aa3"; ctx.font="10px ui-monospace, monospace"; ctx.textAlign="right"; ctx.textBaseline="middle"; ctx.fillText("T"+i,x0-6,y+rowH/2);
+      rr(x0,y,(x1-x0),rowH,5); ctx.fillStyle="#0a0f18"; ctx.fill();
+      const busyEnd=Math.min(play,work[i]); if(busyEnd>0){ rr(x0,y,busyEnd*scale,rowH,5); ctx.fillStyle="rgba(76,201,240,.85)"; ctx.fill(); }
+      // idle tail
+      if(play>work[i]){ const ie=Math.min(play,wall); ctx.fillStyle="rgba(255,93,115,.12)"; ctx.fillRect(x0+work[i]*scale,y+2,(ie-work[i])*scale,rowH-4);
+        if(Math.sin(now/200+i)>0){ ctx.fillStyle="rgba(255,93,115,.5)"; ctx.font="9px ui-monospace, monospace"; ctx.textAlign="left"; ctx.fillText("idle",x0+work[i]*scale+5,y+rowH/2); } }
+    }
+    // wall line
+    ctx.strokeStyle="rgba(255,180,84,.6)"; ctx.lineWidth=1.5; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(x0+wall*scale,top-2); ctx.lineTo(x0+wall*scale,top+n*(rowH+gapY)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle=C.warn; ctx.font="10px ui-monospace, monospace"; ctx.textAlign="left"; ctx.fillText("everyone waits for the slowest →", x0, top+n*(rowH+gapY)+16);
+    // playhead
+    ctx.strokeStyle="rgba(230,237,243,.5)"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(x0+play*scale,top-2); ctx.lineTo(x0+play*scale, top+n*(rowH+gapY)); ctx.stroke();
+  }
+};
+
+/* ============================ ORCHESTRATION ============================ */
+function renderAll(res){
+  renderMetrics(res); renderExplain(res); drawScaling(res); drawRoofline(res);
+  if(reduceMotion) Viz.frame(performance.now());
+}
+function setLoading(){
+  const hb=document.getElementById("heroBig"); hb.textContent="•••"; hb.style.color=C.accent;
+  document.getElementById("heroCap").textContent="measuring on 24 cores…";
+  document.getElementById("metrics").innerHTML='<div class="metric"><span class="k">Compiling &amp; running OpenMP sweep…</span><span class="v accent">live</span></div>';
+}
+function showRunnerError(e){
+  const hb=document.getElementById("heroBig"); hb.textContent="—"; hb.style.color=C.bad;
+  document.getElementById("heroCap").textContent="runner error — reverted to Model";
+  document.getElementById("metrics").innerHTML='<div class="metric"><span class="k">'+String((e&&e.message)||e)+'</span><span class="v bad">!</span></div>';
+  state.mode="model"; syncPills(); buildControls();
+  lastRes=Models[state.exp](state.params[state.exp]); renderAll(lastRes);
+}
+let renderToken = 0;   // guards against a slow async run painting a stale/wrong view
+async function recompute(){
+  const my = ++renderToken;
+  const exp = state.exp;                       // capture: state may change while we await
+  document.getElementById("sceneTag").textContent = EXPERIMENTS.find(e=>e.id===exp).scene;
+  if(state.mode==="model"){
+    lastRes = Models[exp](state.params[exp]);
+    renderAll(lastRes); return;
+  }
+  const p=state.params[exp], {bexp,variant}=runnerSpec(exp,p), key=bexp+"/"+variant;
+  let data=measuredCache[key];
+  if(!data){
+    setLoading();
+    try{ data=await fetchRun(bexp,variant); }
+    catch(e){ if(my===renderToken) showRunnerError(e); return; }
+    if(my!==renderToken) return;               // a newer recompute superseded us — drop stale result
+    measuredCache[key]=data;
+  }
+  if(my!==renderToken) return;
+  lastRes = Measured[exp](p, data);
+  renderAll(lastRes);
+}
+function syncPills(){
+  document.getElementById("pillModel").classList.toggle("sel",state.mode==="model");
+  document.getElementById("pillMeasured").classList.toggle("sel",state.mode==="measured");
+}
+function setMode(mode){
+  if(mode===state.mode || (mode==="measured" && !runnerOk)) return;
+  state.mode=mode; syncPills(); buildControls(); recompute();
+}
+async function checkRunner(){
+  const pm=document.getElementById("pillMeasured");
+  try{
+    const r=await fetch(RUNNER+"/health",{cache:"no-store"}); const j=await r.json();
+    runnerOk=!!j.ok;
+    if(runnerOk){ pm.classList.remove("disabled"); pm.classList.add("click"); pm.title="live runner · "+j.cores+" cores · "+(j.gcc||""); }
+  }catch(e){ runnerOk=false; pm.title="runner offline — run  python3 services/runner/server.py  in WSL"; }
+}
+function selectExp(id){
+  state.exp=id;
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.id===id));
+  buildControls(); recompute();
+}
+function buildTabs(){
+  const host=document.getElementById("tabs");
+  EXPERIMENTS.forEach((e,i)=>{ const b=document.createElement("button"); b.className="tab"+(e.id===state.exp?" active":""); b.dataset.id=e.id;
+    b.innerHTML=`<span class="ix">0${i+1}</span>${e.name}`; b.addEventListener("click",()=>selectExp(e.id)); host.appendChild(b); });
+}
+
+function loop(now){ Viz.frame(now); requestAnimationFrame(loop); }
+function init(){
+  buildTabs(); buildControls(); resizeCanvas();
+  document.getElementById("pillModel").addEventListener("click",()=>setMode("model"));
+  document.getElementById("pillMeasured").addEventListener("click",()=>setMode("measured"));
+  syncPills();
+  recompute();
+  // redraw charts after layout settles
+  setTimeout(()=>{ if(lastRes){drawScaling(lastRes); drawRoofline(lastRes);} },60);
+  if(!reduceMotion) requestAnimationFrame(loop); else Viz.frame(performance.now());
+  checkRunner();
+}
+if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",init); else init();
+})();
+</script>
+</body>
+</html>

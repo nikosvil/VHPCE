@@ -1,0 +1,7 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "!apps/flagship-zero-build" # static P0 demo, not an npm package
+allowBuilds:
+  sharp: true
+  unrs-resolver: true

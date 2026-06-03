@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\Users\\\\nikos\\\\Documents\\\\HPC\\\\VHPCE\\\\services\\\\runner\\\\experiments\")",
+      "PowerShell(\"runner dirs ready\")",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:8099/health\" -UseBasicParsing -TimeoutSec 8; \"STATUS: $\\($r.StatusCode\\)\"; \"CORS: $\\($r.Headers['Access-Control-Allow-Origin']\\)\"; \"BODY: $\\($r.Content\\)\" } catch { \"HEALTH ERROR: $\\($_.Exception.Message\\)\" })",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}

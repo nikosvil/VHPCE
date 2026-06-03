@@ -1,0 +1,19 @@
+# build artifacts
+*.o
+*.out
+services/runner/experiments/bench
+/tmp/vhpce_bench
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# node (later phases)
+node_modules/
+.next/
+dist/
+
+# os / editor
+.DS_Store
+Thumbs.db
