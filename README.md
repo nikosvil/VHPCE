@@ -78,6 +78,7 @@ physically-grounded **model** running in the browser; later the same schema is p
 | 2026-06-03 | Fixed an async **render race** (slow `/run` painting the wrong tab) with a render token | Surfaced during browser verification; measured data now always lands on the tab that requested it |
 | 2026-06-03 | **P1 foundation up**: Node 24 (Windows-native) + pnpm 11 Turborepo; `apps/web` Next 16 / React 19 / Tailwind v4 boots + renders via preview | Web stack on Windows (fast file-watching); C toolchain stays in WSL. Preview launch uses absolute `node.exe` + Next bin (spawner lacks node on PATH) |
 | 2026-06-03 | **Heads-up: Next.js is v16** (newer than training data); template ships an AGENTS.md to consult `node_modules/next/dist/docs` | Verify Next-specific APIs against installed docs before writing components during the flagship port |
+| 2026-06-03 | **P1 core port complete + browser-verified**: flagship runs in `apps/web` on shared packages (`profile-schema`, `perf-models`, `explain`, `viz`), Model + Measured, no console errors | React rebuild of the flagship; `transpilePackages` ships TS source (no build step); render-token guards the async measured fetch. Remaining: Three.js hero scenes + optional "Ask the AI" LLM panel |
 
 ## Open questions (for the user, when we resume building)
 
