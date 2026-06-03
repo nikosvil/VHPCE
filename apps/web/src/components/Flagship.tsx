@@ -1,7 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import FalseSharingScene3D from "./scenes/FalseSharingScene3D";
+import SynchronizationScene3D from "./scenes/SynchronizationScene3D";
+import BandwidthScene3D from "./scenes/BandwidthScene3D";
+import ImbalanceScene3D from "./scenes/ImbalanceScene3D";
 import {
   Models, Measured, runnerSpec, EXPERIMENTS, MAXP, TRIAD_AI,
 } from "@vhpce/perf-models";
@@ -10,6 +13,13 @@ import { drawScaling, drawRoofline, scenes } from "@vhpce/viz";
 import { fmt, type ExperimentResult, type RunnerData } from "@vhpce/profile-schema";
 
 const RUNNER = "http://localhost:8099";
+
+const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null }>> = {
+  falseSharing: FalseSharingScene3D,
+  synchronization: SynchronizationScene3D,
+  bandwidth: BandwidthScene3D,
+  imbalance: ImbalanceScene3D,
+};
 
 type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance";
 type Mode = "model" | "measured";
@@ -41,7 +51,8 @@ export default function Flagship() {
 
   const p = params[exp];
   const measured = mode === "measured";
-  const use3D = exp === "falseSharing" && view === "3d";
+  const use3D = view === "3d";
+  const Scene3D = SCENES_3D[exp];
 
   const setParam = useCallback(
     (patch: any) => setParams((prev) => ({ ...prev, [exp]: { ...prev[exp], ...patch } })),
@@ -277,16 +288,14 @@ export default function Flagship() {
           <h2>
             <span>Visualization</span>
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {exp === "falseSharing" && (
-                <span className="view-toggle">
-                  <button className={view === "2d" ? "on" : ""} onClick={() => setView("2d")}>2D</button>
-                  <button className={view === "3d" ? "on" : ""} onClick={() => setView("3d")}>3D</button>
-                </span>
-              )}
+              <span className="view-toggle">
+                <button className={view === "2d" ? "on" : ""} onClick={() => setView("2d")}>2D</button>
+                <button className={view === "3d" ? "on" : ""} onClick={() => setView("3d")}>3D</button>
+              </span>
               <span className="scene-tag">{expMeta.scene}</span>
             </span>
           </h2>
-          {use3D ? <FalseSharingScene3D result={result} /> : <canvas className="viz" ref={canvasRef} />}
+          {use3D ? <Scene3D result={result} /> : <canvas className="viz" ref={canvasRef} />}
         </section>
 
         <section className="card">
