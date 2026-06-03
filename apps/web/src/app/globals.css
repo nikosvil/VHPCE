@@ -69,6 +69,10 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border: none; b
 .vizwrap h2 { display: flex; justify-content: space-between; align-items: center; }
 .vizwrap h2 .scene-tag { color: var(--muted); text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 11px; }
 canvas.viz { width: 100%; flex: 1; border-radius: 10px; display: block; background: radial-gradient(600px 300px at 50% 0%, rgba(76,201,240,.05), transparent 70%), #070a10; border: 1px solid #15202f; }
+.view-toggle { display: inline-flex; gap: 4px; }
+.view-toggle button { border: 1px solid var(--line); background: #0c1320; color: var(--muted); font-size: 11px; padding: 3px 9px; border-radius: 7px; cursor: pointer; font-family: var(--mono); transition: .12s; }
+.view-toggle button:hover { color: var(--text); border-color: #2c3a50; }
+.view-toggle button.on { background: var(--accent); color: #04121a; border-color: transparent; font-weight: 600; }
 
 .metric { display: flex; justify-content: space-between; align-items: baseline; padding: 9px 0; border-bottom: 1px dashed #182335; }
 .metric:last-child { border-bottom: none; }

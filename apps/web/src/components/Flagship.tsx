@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import FalseSharingScene3D from "./scenes/FalseSharingScene3D";
 import {
   Models, Measured, runnerSpec, EXPERIMENTS, MAXP, TRIAD_AI,
 } from "@vhpce/perf-models";
@@ -23,6 +24,7 @@ const DEFAULT_PARAMS: Record<ExpId, any> = {
 export default function Flagship() {
   const [exp, setExp] = useState<ExpId>("falseSharing");
   const [mode, setMode] = useState<Mode>("model");
+  const [view, setView] = useState<"2d" | "3d">("3d");
   const [params, setParams] = useState<Record<ExpId, any>>(DEFAULT_PARAMS);
   const [result, setResult] = useState<ExperimentResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -39,6 +41,7 @@ export default function Flagship() {
 
   const p = params[exp];
   const measured = mode === "measured";
+  const use3D = exp === "falseSharing" && view === "3d";
 
   const setParam = useCallback(
     (patch: any) => setParams((prev) => ({ ...prev, [exp]: { ...prev[exp], ...patch } })),
@@ -105,8 +108,9 @@ export default function Flagship() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Canvas scene animation loop (mounts once; reads latest result via ref)
+  // Canvas scene animation loop (2D mode only; reads latest result via ref)
   useEffect(() => {
+    if (use3D) return;
     const cv = canvasRef.current;
     if (!cv) return;
     const ctx = cv.getContext("2d");
@@ -135,7 +139,7 @@ export default function Flagship() {
       draw(0);
     }
     return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); };
-  }, []);
+  }, [use3D]);
 
   // Reduced-motion: draw a single static frame whenever the result changes
   useEffect(() => {
@@ -270,8 +274,19 @@ export default function Flagship() {
         </section>
 
         <section className="card vizwrap">
-          <h2><span>Visualization</span><span className="scene-tag">{expMeta.scene}</span></h2>
-          <canvas className="viz" ref={canvasRef} />
+          <h2>
+            <span>Visualization</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {exp === "falseSharing" && (
+                <span className="view-toggle">
+                  <button className={view === "2d" ? "on" : ""} onClick={() => setView("2d")}>2D</button>
+                  <button className={view === "3d" ? "on" : ""} onClick={() => setView("3d")}>3D</button>
+                </span>
+              )}
+              <span className="scene-tag">{expMeta.scene}</span>
+            </span>
+          </h2>
+          {use3D ? <FalseSharingScene3D result={result} /> : <canvas className="viz" ref={canvasRef} />}
         </section>
 
         <section className="card">
