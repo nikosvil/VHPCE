@@ -5,12 +5,13 @@ import FalseSharingScene3D from "./scenes/FalseSharingScene3D";
 import SynchronizationScene3D from "./scenes/SynchronizationScene3D";
 import BandwidthScene3D from "./scenes/BandwidthScene3D";
 import ImbalanceScene3D from "./scenes/ImbalanceScene3D";
+import AskAI from "./AskAI";
 import {
   Models, Measured, runnerSpec, EXPERIMENTS, MAXP, TRIAD_AI,
 } from "@vhpce/perf-models";
 import { Explain, ExplainMeasured } from "@vhpce/explain";
 import { drawScaling, drawRoofline, scenes } from "@vhpce/viz";
-import { fmt, type ExperimentResult, type RunnerData } from "@vhpce/profile-schema";
+import { fmt, type ExperimentResult, type RunnerData, type Explanation } from "@vhpce/profile-schema";
 
 const RUNNER = "http://localhost:8099";
 
@@ -20,6 +21,25 @@ const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null 
   bandwidth: BandwidthScene3D,
   imbalance: ImbalanceScene3D,
 };
+
+const stripHtml = (s: string) => s.replace(/<[^>]+>/g, "");
+
+// Compact, authoritative grounding block for the LLM — the computed numbers + the
+// deterministic finding, so the model explains/extends them instead of inventing figures.
+function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Explanation): string {
+  const c = r.current;
+  const metrics = r.metrics.map((m) => `${m.k} ${m.v}`).join("; ");
+  return [
+    `Experiment: ${name} (${mode} data; source=${r.source}).`,
+    `Current point: ${c.x} of 24 threads — speedup ${fmt(c.speedup, 2)}×, efficiency ${fmt(c.efficiency * 100, 0)}%.`,
+    `On-screen metrics: ${metrics}.`,
+    `Deterministic finding:`,
+    `- What: ${stripHtml(e.what)}`,
+    `- Why: ${stripHtml(e.why)}`,
+    `- How to fix: ${stripHtml(e.how)}`,
+    `- Expected after fix: ${stripHtml(e.exp)}`,
+  ].join("\n");
+}
 
 type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance";
 type Mode = "model" | "measured";
@@ -168,6 +188,7 @@ export default function Flagship() {
   const expMeta = EXPERIMENTS.find((e) => e.id === exp)!;
   const E = measured ? ExplainMeasured : Explain;
   const explanation = result ? E[exp](result) : null;
+  const aiSummary = result && explanation ? buildAiSummary(expMeta.name, mode, result, explanation) : "";
   const cur = result?.current;
   const heroColor = cur
     ? cur.efficiency > 0.7 ? "var(--good)" : cur.efficiency > 0.4 ? "var(--warn)" : "var(--bad)"
@@ -359,6 +380,8 @@ export default function Flagship() {
             </div>
           )}
         </section>
+
+        <AskAI context={{ experimentId: exp, mode, summary: aiSummary }} />
       </div>
 
       <footer className="note">
