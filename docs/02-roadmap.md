@@ -75,8 +75,12 @@ the existing visualizers + explainers render it with zero changes.
 toggle. `services/runner` (stdlib HTTP, not FastAPI yet) compiles and runs the four experiments
 as real OpenMP kernels on 24 cores and returns measured sweeps; the existing charts, metrics, and
 deterministic explanations render measured data unchanged — the seam is proven with real numbers.
-Remaining for full P2: arbitrary user-submitted snippets (not just the four fixed kernels),
-the FastAPI gateway + job queue, Docker-image isolation, and cachegrind-derived cache counters.
+**Update (P2 core done):** arbitrary user-submitted code now runs too — a Monaco **Code Playground**
+at `/playground` compiles and benchmarks any OpenMP C in a **locked-down Docker container**
+(`infra/docker/runner.Dockerfile`: `--network none --cap-drop ALL --read-only`, memory/PID/time
+limits, source via stdin) through the runner's `/run-code` endpoint, and renders the measured
+scaling + a generic reading. Remaining for *full* P2: the FastAPI gateway + Redis/Arq job queue
+(currently a serialized stdlib runner) and cachegrind-derived cache-miss counters.
 
 ---
 

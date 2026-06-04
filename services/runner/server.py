@@ -21,6 +21,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC  = os.path.join(HERE, "experiments", "bench.c")
 BIN  = "/tmp/vhpce_bench"
 PORT = 8099
+DOCKER_IMAGE = "vhpce-runner"
+DEFAULT_SWEEP = [1, 2, 4, 8, 12, 16, 20, 24]
+MAX_SOURCE = 64 * 1024  # bytes
 
 # Allow-list: frontend exp id -> (bench exp, {allowed variants})
 ALLOWED = {
@@ -32,6 +35,7 @@ ALLOWED = {
 
 _cache = {}
 _lock = threading.Lock()
+_run = threading.Lock()   # serialize benchmark subprocesses so timings aren't polluted
 
 
 def compile_bench():
@@ -57,8 +61,9 @@ def run_bench(exp, variant, maxt):
         if key in _cache:
             return _cache[key]
     ensure_built()
-    proc = subprocess.run([BIN, exp, variant, str(maxt)],
-                          capture_output=True, text=True, timeout=180)
+    with _run:
+        proc = subprocess.run([BIN, exp, variant, str(maxt)],
+                              capture_output=True, text=True, timeout=180)
     if proc.returncode != 0:
         raise RuntimeError("run failed:\n" + proc.stderr)
     data = json.loads(proc.stdout)
@@ -70,12 +75,42 @@ def run_bench(exp, variant, maxt):
     return data
 
 
+def run_user_code(source, sweep, reps):
+    """Compile + benchmark arbitrary OpenMP C in a locked-down Docker container.
+    Source arrives via stdin; nothing from the host filesystem is exposed."""
+    if not source or len(source) > MAX_SOURCE:
+        raise ValueError("source missing or too large")
+    sweep = [int(p) for p in (sweep or DEFAULT_SWEEP) if isinstance(p, (int, float)) and 1 <= int(p) <= 64][:32] or DEFAULT_SWEEP
+    reps = max(1, min(int(reps), 5))
+    cmd = [
+        "docker", "run", "--rm", "-i",
+        "--network", "none",
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--memory", "2g", "--memory-swap", "2g",
+        "--pids-limit", "256",
+        "--read-only", "--tmpfs", "/tmp:rw,exec,size=512m",
+        DOCKER_IMAGE,
+        " ".join(str(p) for p in sweep), str(reps),
+    ]
+    with _run:
+        proc = subprocess.run(cmd, input=source, capture_output=True, text=True, timeout=300)
+    if proc.returncode != 0:
+        raise RuntimeError("docker run failed: " + (proc.stderr.strip()[-1500:] or f"rc={proc.returncode}"))
+    data = json.loads(proc.stdout)
+    if "error" not in data:
+        data["source"] = "measured"
+        data["cores"] = os.cpu_count()
+        data["sweepThreads"] = sweep
+    return data
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
 
     def _send(self, code, obj):
@@ -99,8 +134,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             if u.path == "/health":
                 gcc = subprocess.run(["gcc", "--version"], capture_output=True, text=True)
+                dk = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"], capture_output=True, text=True)
                 self._send(200, {"ok": True, "cores": os.cpu_count(),
-                                 "gcc": gcc.stdout.splitlines()[0] if gcc.returncode == 0 else None})
+                                 "gcc": gcc.stdout.splitlines()[0] if gcc.returncode == 0 else None,
+                                 "docker": dk.stdout.strip() if dk.returncode == 0 and dk.stdout.strip() else None})
                 return
             if u.path == "/run":
                 exp     = q.get("exp", [""])[0]
@@ -110,6 +147,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._send(404, {"error": "not found"})
         except Exception as e:  # noqa: BLE001 — surface the message to the UI
+            self._send(500, {"error": str(e)})
+
+    def do_POST(self):
+        u = urllib.parse.urlparse(self.path)
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(length) if length else b"{}"
+            body = json.loads(raw or b"{}")
+            if u.path == "/run-code":
+                data = run_user_code(body.get("source", ""), body.get("threads"), body.get("reps", 2))
+                self._send(200, data)
+                return
+            self._send(404, {"error": "not found"})
+        except Exception as e:  # noqa: BLE001
             self._send(500, {"error": str(e)})
 
     def log_message(self, *args):
