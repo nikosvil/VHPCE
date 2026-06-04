@@ -27,8 +27,20 @@ int main(void) {
 `;
 
 type Point = { p: number; ms: number };
-type RunData = { points?: Point[]; error?: string; message?: string; cores?: number };
+type Cache = { d1MissPct?: number; lldMissPct?: number; llMissPct?: number; irefs?: number; error?: string };
+type RunData = { points?: Point[]; error?: string; message?: string; cores?: number; cache?: Cache };
 type Metric = { k: string; v: string; tone: string };
+
+function missTone(p?: number) { const v = p ?? 0; return v > 20 ? "bad" : v > 5 ? "warn" : "good"; }
+
+function cacheInsight(c: Cache): string {
+  const d1 = c.d1MissPct ?? 0;
+  if (d1 > 20)
+    return "High L1 data-cache miss rate — this kernel is memory latency/bandwidth bound, not compute bound. Better locality (cache blocking, contiguous access, a smaller working set) helps far more than adding threads.";
+  if (d1 > 5)
+    return "Moderate cache misses — some locality is being lost. Restructuring the access order or tiling the loops could help.";
+  return "Low miss rate — cache-friendly access; the working set fits the caches well, so scaling is limited by compute or synchronization, not memory.";
+}
 
 function buildResult(points: Point[]) {
   const t1 = points[0].ms || 1;
@@ -70,6 +82,7 @@ export default function Playground() {
   const [source, setSource] = useState(STARTER);
   const [running, setRunning] = useState(false);
   const [data, setData] = useState<RunData | null>(null);
+  const [profile, setProfile] = useState(false);
   const [runnerOk, setRunnerOk] = useState<boolean | null>(null);
   const [dockerOk, setDockerOk] = useState<boolean | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -96,7 +109,7 @@ export default function Playground() {
       const res = await fetch(RUNNER + "/run-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, threads: SWEEP, reps: 2 }),
+        body: JSON.stringify({ source, threads: SWEEP, reps: 2, profile }),
       });
       setData(await res.json());
     } catch (e: unknown) {
@@ -140,11 +153,15 @@ export default function Playground() {
           />
           <div className="pg-runrow">
             <button className="pg-run" disabled={!canRun} onClick={run}>
-              {running ? "Running on 24 cores…" : "Run ▸"}
+              {running ? (profile ? "Running + profiling…" : "Running on 24 cores…") : "Run ▸"}
             </button>
-            <span className="pg-hint">
-              Compiled <code>-O2 -fopenmp -march=native</code>, timed at {SWEEP.join(", ")} threads (best of 2).
-            </span>
+            <label className="pg-check">
+              <input type="checkbox" checked={profile} onChange={(e) => setProfile(e.target.checked)} />
+              Profile cache misses (cachegrind, slower)
+            </label>
+          </div>
+          <div className="pg-hint" style={{ marginTop: 8 }}>
+            Compiled <code>-O2 -fopenmp -march=native</code>, timed at {SWEEP.join(", ")} threads (best of 2).
           </div>
         </section>
 
@@ -179,6 +196,20 @@ export default function Playground() {
                 <div className="t">Reading</div>
                 <div className="body">{reading(result)}</div>
               </div>
+              {data?.cache && !data.cache.error && (
+                <div className="eb how" style={{ marginTop: 12 }}>
+                  <div className="t">Cache · cachegrind (1 thread, simulated)</div>
+                  <div className="body">
+                    <div className="metric"><span className="k">L1 data miss rate</span><span className={"v " + missTone(data.cache.d1MissPct)}>{fmt(data.cache.d1MissPct ?? 0, 1)}%</span></div>
+                    <div className="metric"><span className="k">Last-level data miss</span><span className={"v " + missTone(data.cache.lldMissPct)}>{fmt(data.cache.lldMissPct ?? 0, 1)}%</span></div>
+                    <div className="metric"><span className="k">Instructions executed</span><span className="v">{(data.cache.irefs ?? 0).toLocaleString()}</span></div>
+                    <div style={{ marginTop: 8 }}>{cacheInsight(data.cache)}</div>
+                  </div>
+                </div>
+              )}
+              {data?.cache?.error && (
+                <div className="pg-hint" style={{ marginTop: 10 }}>Cache profiling: {data.cache.error}</div>
+              )}
             </>
           )}
         </section>

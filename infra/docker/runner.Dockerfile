@@ -4,7 +4,7 @@
 FROM ubuntu:24.04
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends gcc libc6-dev \
+ && apt-get install -y --no-install-recommends gcc libc6-dev valgrind \
  && rm -rf /var/lib/apt/lists/*
 
 COPY bench-driver.sh /usr/local/bin/bench-driver.sh

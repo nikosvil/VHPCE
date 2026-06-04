@@ -75,7 +75,7 @@ def run_bench(exp, variant, maxt):
     return data
 
 
-def run_user_code(source, sweep, reps):
+def run_user_code(source, sweep, reps, profile=False):
     """Compile + benchmark arbitrary OpenMP C in a locked-down Docker container.
     Source arrives via stdin; nothing from the host filesystem is exposed."""
     if not source or len(source) > MAX_SOURCE:
@@ -91,7 +91,7 @@ def run_user_code(source, sweep, reps):
         "--pids-limit", "256",
         "--read-only", "--tmpfs", "/tmp:rw,exec,size=512m",
         DOCKER_IMAGE,
-        " ".join(str(p) for p in sweep), str(reps),
+        " ".join(str(p) for p in sweep), str(reps), "1" if profile else "0",
     ]
     with _run:
         proc = subprocess.run(cmd, input=source, capture_output=True, text=True, timeout=300)
@@ -156,7 +156,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raw = self.rfile.read(length) if length else b"{}"
             body = json.loads(raw or b"{}")
             if u.path == "/run-code":
-                data = run_user_code(body.get("source", ""), body.get("threads"), body.get("reps", 2))
+                data = run_user_code(body.get("source", ""), body.get("threads"), body.get("reps", 2), bool(body.get("profile")))
                 self._send(200, data)
                 return
             self._send(404, {"error": "not found"})

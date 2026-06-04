@@ -79,8 +79,11 @@ deterministic explanations render measured data unchanged — the seam is proven
 at `/playground` compiles and benchmarks any OpenMP C in a **locked-down Docker container**
 (`infra/docker/runner.Dockerfile`: `--network none --cap-drop ALL --read-only`, memory/PID/time
 limits, source via stdin) through the runner's `/run-code` endpoint, and renders the measured
-scaling + a generic reading. Remaining for *full* P2: the FastAPI gateway + Redis/Arq job queue
-(currently a serialized stdlib runner) and cachegrind-derived cache-miss counters.
+scaling + a generic reading. The playground also offers opt-in **cachegrind** cache-miss profiling (D1/LLd miss rates +
+instruction count, via `--cache-sim=yes` in the container). The remaining piece — the
+**FastAPI gateway + Redis/Arq job queue** — is **deferred to the cloud/multi-user phase (P5)**
+(user decision): the serialized stdlib runner is correct and sufficient for local single-user
+use, and a queue mainly earns its keep under concurrent load. **P2 is complete for local use.**
 
 ---
 
