@@ -1,39 +1,34 @@
-# services/runner — local measurement runner (Phase 2 prototype)
+# services/runner — fixed-kernel source (the four flagship experiments)
 
-**Producer B** for the flagship: compiles `experiments/bench.c` and runs the four OpenMP
-experiments on this machine's 24 cores, serving the *measured* sweeps to the UI behind a
-**Model | Measured** toggle. This is the seam from [docs/01-architecture.md](../../docs/01-architecture.md)
-working with real data instead of the in-browser model.
+`experiments/bench.c` holds the real OpenMP kernels behind the flagship's **Measured** mode:
+false sharing, synchronization, bandwidth saturation, load imbalance. It is a self-contained
+program — `bench <exp> <variant> <maxthreads>` — that runs a 1→N thread sweep and prints the
+measured points as JSON:
 
-Standard library only — no `pip install`. The production gateway will be FastAPI; this is a
-zero-dependency stand-in so we can measure today.
-
-## Prerequisites (one-time, in WSL Ubuntu)
-
-```bash
-sudo apt-get update && sudo apt-get install -y build-essential gfortran valgrind
+```
+{"exp":..,"variant":..,"points":[{"p":1,"ms":..[,"gbps":..,"gflops":..]}, ...]}
 ```
 
-## Run
+— exactly the `RunnerData` shape the `ProfileResult` seam consumes.
+
+## How it runs now
+
+The original **stdlib HTTP runner (`server.py`) is retired.** Execution moved to the
+cloud-phase backend in **[`services/api`](../api/README.md)** (FastAPI + Redis/Arq): the worker
+spawns sibling Docker containers and serializes them for clean timing. `bench.c` is compiled
+into the **`vhpce-bench`** image at build time (`infra/docker/bench.Dockerfile`, `-O2 -fopenmp
+-march=native`); arbitrary Playground code runs in **`vhpce-runner`**
+(`infra/docker/runner.Dockerfile`).
 
 ```bash
-python3 services/runner/server.py     # inside WSL; listens on :8099
+docker compose -f infra/docker/compose.yml --profile build build   # builds vhpce-bench + vhpce-runner
+docker compose -f infra/docker/compose.yml up -d                   # redis + api + worker
 ```
 
-WSL2 forwards `localhost`, so the Windows browser can reach `http://localhost:8099`.
+## What's real vs modeled
 
-## Endpoints
-
-- `GET /health` → `{ok, cores, gcc}`
-- `GET /run?exp=<falsesharing|sync|bandwidth|imbalance>&variant=<...>&maxthreads=24`
-  → `{exp, variant, source:"measured", cores, points:[{p, ms[, gbps, gflops]}, ...]}`
-
-The frontend derives speedup / efficiency / diagnostics from `points` using the *same*
-code path as the model, so the visualizations and explanations are unchanged.
-
-## What's real vs modeled here
-
-Real: compilation, execution, wall-clock timing, thread scaling on 24 cores, achieved
-DRAM bandwidth (bytes/time) and GFLOP/s for the triad. Not measured locally (WSL2 has no
-host PMU): hardware cache-miss / IPC counters — those arrive on bare-metal/cloud (Phase 5).
-The thread-timeline animations remain schematic; the metrics and charts use measured data.
+Real: compilation, execution, wall-clock timing, thread scaling on 24 cores, achieved DRAM
+bandwidth (bytes/time) and GFLOP/s for the triad. Not measured locally (WSL2 has no host PMU):
+hardware cache-miss / IPC counters — those arrive on bare-metal/cloud (Phase 5). The Playground
+adds **simulated** cache-miss counters via cachegrind. The offline path is the flagship's
+**Model** mode (pure client-side, no backend, no Docker).

@@ -80,10 +80,16 @@ at `/playground` compiles and benchmarks any OpenMP C in a **locked-down Docker 
 (`infra/docker/runner.Dockerfile`: `--network none --cap-drop ALL --read-only`, memory/PID/time
 limits, source via stdin) through the runner's `/run-code` endpoint, and renders the measured
 scaling + a generic reading. The playground also offers opt-in **cachegrind** cache-miss profiling (D1/LLd miss rates +
-instruction count, via `--cache-sim=yes` in the container). The remaining piece — the
-**FastAPI gateway + Redis/Arq job queue** — is **deferred to the cloud/multi-user phase (P5)**
-(user decision): the serialized stdlib runner is correct and sufficient for local single-user
-use, and a queue mainly earns its keep under concurrent load. **P2 is complete for local use.**
+instruction count, via `--cache-sim=yes` in the container). **P2 is complete for local use.**
+
+**Cloud Phase (2026-06-04) — landed.** The deferred **FastAPI gateway + Redis + Arq job queue**
+is built (`services/api` + `infra/docker/compose.yml`). Per a user decision the backend is
+**unified**: the stdlib runner is retired and *both* producers — the flagship's fixed kernels
+(`vhpce-bench`) and arbitrary Playground code (`vhpce-runner`) — now `POST /api/jobs` and poll
+`GET /api/jobs/{id}`. The Arq worker runs `max_jobs=1` (one container at a time → clean timing) and
+mounts the host Docker socket to spawn the sandbox siblings; bench results are cached in Redis.
+This is the cloud-scale groundwork from Phase 5, brought forward — true multi-user autoscaling
+(K8s Jobs) and PMU counters remain the bare-metal/cloud upgrade.
 
 ---
 

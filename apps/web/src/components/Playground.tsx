@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { drawScaling } from "@vhpce/viz";
 import { fmt } from "@vhpce/profile-schema";
+import { health, runJob, type Phase } from "../lib/runner";
 
-const RUNNER = "http://localhost:8099";
 const SWEEP = [1, 2, 4, 8, 12, 16, 20, 24];
 
 const STARTER = `/* OpenMP playground — your code runs on 24 real cores.
@@ -81,15 +81,16 @@ function reading(r: ReturnType<typeof buildResult>): string {
 export default function Playground() {
   const [source, setSource] = useState(STARTER);
   const [running, setRunning] = useState(false);
+  const [phase, setPhase] = useState<Phase | null>(null);
   const [data, setData] = useState<RunData | null>(null);
   const [profile, setProfile] = useState(false);
   const [runnerOk, setRunnerOk] = useState<boolean | null>(null);
   const [dockerOk, setDockerOk] = useState<boolean | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const runIdRef = useRef(0);
 
   useEffect(() => {
-    fetch(RUNNER + "/health", { cache: "no-store" })
-      .then((r) => r.json())
+    health()
       .then((j) => { setRunnerOk(true); setDockerOk(!!j.docker); })
       .catch(() => { setRunnerOk(false); setDockerOk(false); });
   }, []);
@@ -103,19 +104,22 @@ export default function Playground() {
 
   async function run() {
     if (running) return;
+    const my = ++runIdRef.current;
     setRunning(true);
     setData(null);
+    setPhase("queued");
     try {
-      const res = await fetch(RUNNER + "/run-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, threads: SWEEP, reps: 2, profile }),
-      });
-      setData(await res.json());
+      const result = await runJob(
+        { kind: "code", source, threads: SWEEP, reps: 2, profile },
+        { onStatus: (p) => { if (my === runIdRef.current) setPhase(p); } },
+      );
+      if (my !== runIdRef.current) return; // superseded by a newer run
+      setData(result as RunData);
     } catch (e: unknown) {
+      if (my !== runIdRef.current) return;
       setData({ error: "network", message: String((e as Error)?.message || e) });
     } finally {
-      setRunning(false);
+      if (my === runIdRef.current) { setRunning(false); setPhase(null); }
     }
   }
 
@@ -134,10 +138,10 @@ export default function Playground() {
       </header>
 
       {runnerOk === false && (
-        <div className="banner">Runner offline — start it with <code>python3 services/runner/server.py</code> in WSL.</div>
+        <div className="banner">Gateway offline — start it with <code>docker compose -f infra/docker/compose.yml up</code>.</div>
       )}
       {runnerOk === true && dockerOk === false && (
-        <div className="banner">Docker isn&apos;t ready — start Docker Desktop, enable Ubuntu WSL integration, and build the <code>vhpce-runner</code> image.</div>
+        <div className="banner">Docker isn&apos;t ready — start Docker Desktop, enable Ubuntu WSL integration, and build the images (<code>docker compose -f infra/docker/compose.yml --profile build build</code>).</div>
       )}
 
       <div className="pg-grid">
@@ -153,7 +157,11 @@ export default function Playground() {
           />
           <div className="pg-runrow">
             <button className="pg-run" disabled={!canRun} onClick={run}>
-              {running ? (profile ? "Running + profiling…" : "Running on 24 cores…") : "Run ▸"}
+              {running
+                ? phase === "queued"
+                  ? "Queued…"
+                  : profile ? "Running + profiling…" : "Running on 24 cores…"
+                : "Run ▸"}
             </button>
             <label className="pg-check">
               <input type="checkbox" checked={profile} onChange={(e) => setProfile(e.target.checked)} />
@@ -170,7 +178,7 @@ export default function Playground() {
           {!data && !running && (
             <div className="askai-note">Edit the code and hit Run. It compiles and runs in a locked-down container — no network, dropped capabilities, memory/PID/time limits.</div>
           )}
-          {running && <div className="askai-note">Compiling and sweeping thread counts on your 24 cores…</div>}
+          {running && <div className="askai-note">{phase === "queued" ? "Queued — waiting for the runner…" : "Compiling and sweeping thread counts on your 24 cores…"}</div>}
           {data?.error === "compile" && (
             <div className="pg-cc"><div className="pg-cc-title">Compile error</div><pre>{data.message}</pre></div>
           )}

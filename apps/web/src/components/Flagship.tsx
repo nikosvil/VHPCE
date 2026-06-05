@@ -12,8 +12,7 @@ import {
 import { Explain, ExplainMeasured } from "@vhpce/explain";
 import { drawScaling, drawRoofline, scenes } from "@vhpce/viz";
 import { fmt, type ExperimentResult, type RunnerData, type Explanation } from "@vhpce/profile-schema";
-
-const RUNNER = "http://localhost:8099";
+import { health, runJob } from "../lib/runner";
 
 const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null }>> = {
   falseSharing: FalseSharingScene3D,
@@ -79,11 +78,10 @@ export default function Flagship() {
     [exp],
   );
 
-  // Runner health check (enables the Measured pill)
+  // Gateway health check (enables the Measured pill)
   useEffect(() => {
     let alive = true;
-    fetch(RUNNER + "/health", { cache: "no-store" })
-      .then((r) => r.json())
+    health()
       .then((j) => { if (alive && j?.ok) setRunnerOk(true); })
       .catch(() => {});
     return () => { alive = false; };
@@ -103,14 +101,14 @@ export default function Flagship() {
     const cached = cacheRef.current[key];
     if (cached) { setResult(Measured[exp](cp, cached)); return; }
     setLoading(true);
-    fetch(`${RUNNER}/run?exp=${bexp}&variant=${variant}&maxthreads=${MAXP}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data: RunnerData & { error?: string }) => {
+    runJob({ kind: "bench", exp: bexp, variant, maxthreads: MAXP })
+      .then((data) => {
         if (my !== tokenRef.current) return; // superseded
-        if (data.error) throw new Error(data.error);
-        cacheRef.current[key] = data;
+        const d = data as RunnerData & { error?: string; message?: string };
+        if (!d || d.error) throw new Error(d?.message || d?.error || "run failed");
+        cacheRef.current[key] = d;
         setLoading(false);
-        setResult(Measured[exp](cp, data));
+        setResult(Measured[exp](cp, d));
       })
       .catch((e) => {
         if (my !== tokenRef.current) return;
@@ -208,7 +206,7 @@ export default function Flagship() {
           </span>
           <span
             className={"pill " + (runnerOk ? "click" : "disabled") + (mode === "measured" ? " sel" : "")}
-            title={runnerOk ? "live runner · 24 cores" : "runner offline — run  python3 services/runner/server.py  in WSL"}
+            title={runnerOk ? "live gateway · 24 cores" : "gateway offline — start it with  docker compose -f infra/docker/compose.yml up"}
             onClick={() => { if (runnerOk) setMode("measured"); }}
           >
             <span className="dot" />Measured · 24 cores
@@ -387,7 +385,7 @@ export default function Flagship() {
       <footer className="note">
         <b>Model</b> numbers come from physically-grounded formulas (Amdahl, cache-coherence cost,
         bandwidth saturation, load-imbalance) in <code>@vhpce/perf-models</code>. <b>Measured</b> numbers
-        are real OpenMP runs on this laptop&apos;s 24 cores via the local WSL runner. Same
+        are real OpenMP runs on this laptop&apos;s 24 cores, queued through the local gateway (Docker). Same
         <code> ProfileResult </code> seam feeds the charts, metrics, and explanations either way.
       </footer>
     </main>

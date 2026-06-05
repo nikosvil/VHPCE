@@ -1,0 +1,69 @@
+# VHPCE cloud-phase stack: Redis + FastAPI gateway + Arq worker.
+#
+# Build the sandbox images once (tags them in the host daemon the worker reaches via the socket):
+#   docker compose -f infra/docker/compose.yml --profile build build
+# Then start the stack:
+#   docker compose -f infra/docker/compose.yml up -d        # redis + api + worker
+#   docker compose -f infra/docker/compose.yml logs -f      # follow
+#   docker compose -f infra/docker/compose.yml down         # stop
+#
+# Requires Docker Desktop running with Ubuntu WSL integration on.
+name: vhpce
+
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    image: vhpce-gateway          # api + worker share one image; built once
+    build:
+      context: ../../services/api
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379
+      VHPCE_BENCH_IMAGE: vhpce-bench
+      VHPCE_RUNNER_IMAGE: vhpce-runner
+    volumes:
+      # Docker-out-of-Docker: drive the host daemon to spawn sibling sandbox containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  worker:
+    image: vhpce-gateway          # reuses the api build (command differs)
+    build:
+      context: ../../services/api
+    environment:
+      REDIS_URL: redis://redis:6379
+      VHPCE_BENCH_IMAGE: vhpce-bench
+      VHPCE_RUNNER_IMAGE: vhpce-runner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["arq", "worker.WorkerSettings"]
+
+  # --- build-only: produce the sandbox images in the host daemon (NOT started by `up`) ---
+  # `image:` fixes the tag the worker invokes via `docker run`.
+  bench:
+    profiles: ["build"]
+    image: vhpce-bench
+    build:
+      context: ../..
+      dockerfile: infra/docker/bench.Dockerfile
+
+  runner:
+    profiles: ["build"]
+    image: vhpce-runner
+    build:
+      context: .
+      dockerfile: runner.Dockerfile
