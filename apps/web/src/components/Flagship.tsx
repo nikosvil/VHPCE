@@ -5,6 +5,7 @@ import FalseSharingScene3D from "./scenes/FalseSharingScene3D";
 import SynchronizationScene3D from "./scenes/SynchronizationScene3D";
 import BandwidthScene3D from "./scenes/BandwidthScene3D";
 import ImbalanceScene3D from "./scenes/ImbalanceScene3D";
+import MpiScene3D from "./scenes/MpiScene3D";
 import AskAI from "./AskAI";
 import {
   Models, Measured, runnerSpec, EXPERIMENTS, MAXP, TRIAD_AI,
@@ -19,6 +20,7 @@ const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null 
   synchronization: SynchronizationScene3D,
   bandwidth: BandwidthScene3D,
   imbalance: ImbalanceScene3D,
+  mpiHalo: MpiScene3D,
 };
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, "");
@@ -30,7 +32,7 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
   const metrics = r.metrics.map((m) => `${m.k} ${m.v}`).join("; ");
   return [
     `Experiment: ${name} (${mode} data; source=${r.source}).`,
-    `Current point: ${c.x} of 24 threads — speedup ${fmt(c.speedup, 2)}×, efficiency ${fmt(c.efficiency * 100, 0)}%.`,
+    `Current point: ${c.x} of 24 ${r.xUnits === "ranks" ? "ranks" : "threads"} — speedup ${fmt(c.speedup, 2)}×, efficiency ${fmt(c.efficiency * 100, 0)}%.`,
     `On-screen metrics: ${metrics}.`,
     `Deterministic finding:`,
     `- What: ${stripHtml(e.what)}`,
@@ -40,7 +42,7 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
   ].join("\n");
 }
 
-type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance";
+type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo";
 type Mode = "model" | "measured";
 
 const DEFAULT_PARAMS: Record<ExpId, any> = {
@@ -48,6 +50,7 @@ const DEFAULT_PARAMS: Record<ExpId, any> = {
   synchronization: { threads: 24, mode: "critical" },
   bandwidth: { threads: 24, ai: 0.1 },
   imbalance: { threads: 24, sched: "static" },
+  mpiHalo: { ranks: 24, mode: "strong" },
 };
 
 export default function Flagship() {
@@ -72,6 +75,9 @@ export default function Flagship() {
   const measured = mode === "measured";
   const use3D = view === "3d";
   const Scene3D = SCENES_3D[exp];
+  const xKey = exp === "mpiHalo" ? "ranks" : "threads";   // degree-of-parallelism param
+  const xLabel = exp === "mpiHalo" ? "Ranks" : "Threads";
+  const xUnits = result?.xUnits === "ranks" ? "ranks" : "threads";
 
   const setParam = useCallback(
     (patch: any) => setParams((prev) => ({ ...prev, [exp]: { ...prev[exp], ...patch } })),
@@ -96,12 +102,16 @@ export default function Flagship() {
       setLoading(false);
       return;
     }
+    const isMpi = exp === "mpiHalo";
     const { bexp, variant } = runnerSpec(exp, cp);
-    const key = bexp + "/" + variant;
+    const key = isMpi ? "mpi/" + cp.mode : bexp + "/" + variant;
     const cached = cacheRef.current[key];
     if (cached) { setResult(Measured[exp](cp, cached)); return; }
     setLoading(true);
-    runJob({ kind: "bench", exp: bexp, variant, maxthreads: MAXP })
+    const body = isMpi
+      ? { kind: "mpi" as const, variant: cp.mode, maxranks: MAXP }
+      : { kind: "bench" as const, exp: bexp, variant, maxthreads: MAXP };
+    runJob(body)
       .then((data) => {
         if (my !== tokenRef.current) return; // superseded
         const d = data as RunnerData & { error?: string; message?: string };
@@ -233,9 +243,9 @@ export default function Flagship() {
         <section className="card">
           <h2>Controls</h2>
           <div className="ctrl">
-            <label>Threads<b>{p.threads}</b></label>
-            <input type="range" min={1} max={MAXP} step={1} value={p.threads}
-              onChange={(e) => setParam({ threads: +e.target.value })} />
+            <label>{xLabel}<b>{p[xKey]}</b></label>
+            <input type="range" min={1} max={MAXP} step={1} value={p[xKey]}
+              onChange={(e) => setParam({ [xKey]: +e.target.value })} />
           </div>
 
           {exp === "falseSharing" && (
@@ -301,6 +311,18 @@ export default function Flagship() {
               <div className="fixhint">The fix: dynamic/guided scheduling lets idle threads steal remaining work.</div>
             </div>
           )}
+
+          {exp === "mpiHalo" && (
+            <div className="ctrl">
+              <label>Scaling regime</label>
+              <div className="seg fix">
+                {[["strong", "strong"], ["weak", "weak ✓"]].map(([k, lab]) => (
+                  <button key={k} className={p.mode === k ? "on" : ""} onClick={() => setParam({ mode: k })}>{lab}</button>
+                ))}
+              </div>
+              <div className="fixhint">The fix: weak scaling — grow the grid with the ranks so each rank keeps the same work; efficiency stays flat instead of hitting the communication wall.</div>
+            </div>
+          )}
         </section>
 
         <section className="card vizwrap">
@@ -324,7 +346,7 @@ export default function Flagship() {
               {loading ? "•••" : cur ? fmt(cur.speedup, 1) + "×" : "—"}
             </div>
             <div className="cap">
-              {loading ? "measuring on 24 cores…" : cur ? `speedup on ${cur.x} of 24 cores` : "speedup"}
+              {loading ? `measuring on 24 ${xUnits === "ranks" ? "ranks" : "cores"}…` : cur ? `speedup on ${cur.x} of 24 ${xUnits === "ranks" ? "ranks" : "cores"}` : "speedup"}
             </div>
           </div>
           <div>
@@ -344,7 +366,7 @@ export default function Flagship() {
 
       <div className="lower">
         <section className="card">
-          <h2>Scaling · 1 → 24 threads</h2>
+          <h2>Scaling · 1 → {MAXP} {xUnits}</h2>
           <div className={"charts" + (exp === "bandwidth" ? " two" : "")}>
             <div className="chart">
               <svg ref={scalingRef} />

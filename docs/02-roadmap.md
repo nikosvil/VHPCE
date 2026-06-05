@@ -100,6 +100,17 @@ animator** (halo exchange, reductions, broadcasts, all-to-all); latency-vs-bandw
 **DoD:** a halo-exchange example animates real rank communication and explains comm-dominated
 scaling.
 
+**Status (2026-06-04) — landed.** A fifth flagship experiment, **MPI Halo Exchange**: a 1-D Jacobi
+stencil with ring halo exchange, run across a **rank sweep** through the gateway's `{kind:"mpi"}`
+job → `vhpce-mpi` (OpenMPI, `mpirun --oversubscribe`). The teaching contrast is **strong vs weak
+scaling** — strong (fixed grid) saturates as the comm fraction grows; weak (grid ∝ ranks) holds
+efficiency near ideal. The scaling axis generalizes to **ranks** (`ExperimentResult.xUnits`) and
+`buildResult` gained weak-scaling (scaled-speedup) metrics; a 2D Canvas + 3D R3F scene animate the
+halo packets. The **model** shows the vivid comm-dominated curve; **measured** shows this single
+node's shared-memory reality (gentler wall) — the seam carries both, proving a *second execution
+model* end-to-end. (Score-P/mpiP trace parsing and the broadcast/all-to-all patterns remain future
+work; comm fraction is currently derived from the scaling curve / model.)
+
 ## Phase 4 — GPU / CUDA (local on the RTX 5060)
 
 Deliverables: CUDA toolkit in WSL2 (GPU already visible via passthrough); Nsight Systems parsing

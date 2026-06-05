@@ -61,7 +61,13 @@ class CodeJob(BaseModel):
     profile: bool = False
 
 
-JobSubmit = Annotated[Union[BenchJob, CodeJob], Field(discriminator="kind")]
+class MpiJob(BaseModel):
+    kind: Literal["mpi"]
+    variant: str               # "strong" | "weak"
+    maxranks: int = 24
+
+
+JobSubmit = Annotated[Union[BenchJob, CodeJob, MpiJob], Field(discriminator="kind")]
 
 
 @app.post("/api/jobs")
@@ -76,6 +82,16 @@ async def submit(job: JobSubmit):
         if cached:
             return {"id": None, "status": "done", "result": json.loads(cached), "cached": True}
         j = await redis.enqueue_job("run_bench_task", job.exp, job.variant, maxt)
+        return {"id": j.job_id, "status": "queued"}
+    if job.kind == "mpi":
+        if job.variant not in settings.ALLOWED_MPI:
+            return {"id": None, "status": "error",
+                    "result": {"error": "badrequest", "message": f"unknown mpi variant: {job.variant}"}}
+        maxr = max(1, min(int(job.maxranks), 64))
+        cached = await redis.get(f"mpi:{job.variant}:{maxr}")
+        if cached:
+            return {"id": None, "status": "done", "result": json.loads(cached), "cached": True}
+        j = await redis.enqueue_job("run_mpi_task", job.variant, maxr)
         return {"id": j.job_id, "status": "queued"}
     # kind == "code"
     j = await redis.enqueue_job("run_code_task", job.source, job.threads, job.reps, job.profile)

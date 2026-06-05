@@ -1,9 +1,9 @@
 # VHPCE — Progress Snapshot
 
-_Last updated: 2026-06-04 · `main` · uncommitted: Cloud Phase (FastAPI gateway + Redis/Arq)_
+_Last updated: 2026-06-04 · branch `mpi-phase` (off `cloud-phase`)_
 
 A working build of **Visual HPC for Engineers** — an interactive performance laboratory.
-**Phases P0, P1, P2, and the Cloud Phase (FastAPI gateway + Redis/Arq queue) are complete.**
+**Phases P0, P1, P2, the Cloud Phase (FastAPI gateway + Redis/Arq queue), and P3 (MPI) are complete.**
 This file is the resume point: what's done, how to run it, what changed, and the next concrete steps.
 
 > The design contract lives in `docs/` (`01-architecture.md` … `06-data-contracts.md`) and the
@@ -19,7 +19,7 @@ This file is the resume point: what's done, how to run it, what changed, and the
 | **P1** | Next.js monorepo; flagship on shared packages; Model\|Measured; 3D hero scenes; Ask-the-AI | ✅ done |
 | **P2** | Code Playground (arbitrary OpenMP C in a locked-down Docker container) + cachegrind | ✅ **complete for local use** |
 | **Cloud** | FastAPI gateway + Redis/Arq job queue; both producers async submit/poll; stdlib runner retired | ✅ **done** |
-| P3 | MPI execution + communication animator | ⬜ not started |
+| **P3** | MPI execution (`{kind:"mpi"}` → `vhpce-mpi`) + "MPI Halo Exchange" experiment (strong vs weak) | ✅ **done** |
 | P4 | GPU/CUDA (RTX 5060, local via WSL2 passthrough) + occupancy | ⬜ not started |
 | P5 | Engineering modules, gamification, classrooms, cloud scale (incl. the deferred queue) | ⬜ not started |
 
@@ -34,11 +34,17 @@ Playground code) go through one async backend; **Model mode is the only offline 
 
 ## 2. What's built (concise)
 
-- **Flagship** (`/`) — four experiments (false sharing, synchronization, bandwidth saturation,
-  load imbalance), each with: model + **measured** (real 24-core OpenMP) data behind a
+- **Flagship** (`/`) — five experiments (false sharing, synchronization, bandwidth saturation,
+  load imbalance, **MPI halo exchange**), each with: model + **measured** data behind a
   **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a **2D | 3D**
   visualization toggle (Canvas2D scenes in `@vhpce/viz`; R3F/Three.js hero scenes per experiment);
-  D3 scaling chart (+ roofline for bandwidth).
+  D3 scaling chart (+ roofline for bandwidth). The scaling axis generalizes to **ranks** for MPI
+  (`ExperimentResult.xUnits`); weak scaling uses scaled-speedup/efficiency in `buildResult`.
+- **MPI Halo Exchange** (P3) — a 1-D Jacobi stencil with ring halo exchange, swept across ranks.
+  The **strong vs weak** toggle is the lesson: strong (fixed grid) saturates as the comm fraction
+  grows; weak (grid ∝ ranks) holds efficiency near ideal. Measured runs go through the gateway's
+  `{kind:"mpi"}` job → `vhpce-mpi` (OpenMPI, `mpirun` rank sweep). The model shows the vivid
+  comm wall; measured shows this one node's shared-memory reality (gentler) — the seam carries both.
 - **Ask the AI** (`apps/web/src/app/api/ask/route.ts` + `AskAI.tsx`) — optional Claude panel
   (`claude-opus-4-8`, streaming), **grounded on the deterministic findings**; key via
   `ANTHROPIC_API_KEY` or a per-tab bring-your-own key; built-in explanations always on.
@@ -103,12 +109,13 @@ vhpce/
 │     └─ src/
 │        ├─ app/ layout.tsx · page.tsx (→Flagship) · globals.css (dark theme)
 │        │       playground/page.tsx (→Playground) · api/ask/route.ts (LLM, streaming)
+│        ├─ lib/runner.ts          gateway client: health() + runJob() submit/poll (Flagship + Playground)
 │        └─ components/
 │           ├─ Flagship.tsx        flagship shell: state, Model|Measured, recompute, charts, AskAI
 │           ├─ Playground.tsx      Monaco editor + run/profile + result + cache panel
 │           ├─ AskAI.tsx           streaming LLM panel (grounded)
 │           ├─ Nav.tsx             top nav (Flagship | Playground)
-│           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance}Scene3D
+│           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance,Mpi}Scene3D
 │
 ├─ packages/                       shared TS (transpiled by Next, no build step)
 │  ├─ profile-schema/src/index.ts  the seam: ExperimentResult/Explanation types + fmt/clamp
@@ -118,17 +125,19 @@ vhpce/
 │
 ├─ services/
 │  ├─ api/                         Producer B gateway (Cloud Phase)
-│  │  ├─ app.py                    FastAPI: /api/health, POST /api/jobs, GET /api/jobs/{id}
-│  │  ├─ worker.py                 Arq worker (max_jobs=1): run_bench_task, run_code_task → docker run
+│  │  ├─ app.py                    FastAPI: /api/health, POST /api/jobs ({bench|code|mpi}), GET /api/jobs/{id}
+│  │  ├─ worker.py                 Arq worker (max_jobs=1): run_bench_task / run_code_task / run_mpi_task → docker run
 │  │  ├─ settings.py · requirements.txt · Dockerfile · README.md
 │  └─ runner/
-│     └─ experiments/bench.c       the four fixed OpenMP kernels (now the vhpce-bench source)
+│     └─ experiments/             bench.c (vhpce-bench, OpenMP) · halo.c (vhpce-mpi, MPI 1-D stencil)
 │
 └─ infra/docker/
-   ├─ compose.yml                  redis + api + worker; build profile tags vhpce-bench + vhpce-runner
+   ├─ compose.yml                  redis + api + worker; build profile tags vhpce-bench/runner/mpi
    ├─ runner.Dockerfile            gcc + valgrind image, non-root, ENTRYPOINT bench-driver.sh (untrusted code)
    ├─ bench-driver.sh              compile-from-stdin → thread sweep (best-of-N) → JSON [+ cachegrind]
-   └─ bench.Dockerfile             bakes bench.c (-march=native) → vhpce-bench, ENTRYPOINT bench
+   ├─ bench.Dockerfile             bakes bench.c (-march=native) → vhpce-bench, ENTRYPOINT bench
+   ├─ mpi.Dockerfile               OpenMPI; bakes halo.c (mpicc) → vhpce-mpi, ENTRYPOINT mpi-driver.sh
+   └─ mpi-driver.sh                rank sweep: mpirun --oversubscribe -np k (best-of-2) → JSON
 ```
 
 ---
@@ -145,26 +154,27 @@ vhpce/
 
 ## 6. Next 3 implementation steps
 
-Recommended forward path is **P3 (MPI)** — self-contained, reuses the seam and `Scene3DShell`.
-(The two triggers above can pre-empt this if you choose.)
+Recommended forward path is **P4 (GPU / CUDA)** — the RTX 5060 + CUDA passthrough is confirmed in
+WSL, and it reuses the seam, the gateway job pattern, and `Scene3DShell` exactly like P3 did.
 
-1. **MPI execution path (a third job kind).** Add OpenMPI to a new image
-   (`infra/docker/mpi.Dockerfile`: `gcc`, `libopenmpi-dev`, `openmpi-bin`); compile a user/sample
-   MPI C program and run it across a **rank sweep** (`mpirun --oversubscribe -np k`) on the single
-   node, timing each. Add a `run_mpi_task` to `services/api/worker.py` and a `{kind:"mpi"}` branch to
-   `POST /api/jobs` (reuse the submit/poll plumbing + `lib/runner.ts`), returning the same
-   `{points:[{p,ms}]}` shape so existing `buildResult`/charts work unchanged. Optionally parse
-   **mpiP** for a communication fraction.
+1. **CUDA execution path (a fourth job kind).** Add a `vhpce-cuda` image
+   (`infra/docker/cuda.Dockerfile`: CUDA toolkit / `nvcc`; the container needs `--gpus all` so the
+   worker's `docker run` must pass GPU access — verify Docker Desktop GPU passthrough first). Bake a
+   sample CUDA kernel (e.g. SAXPY/stencil); time it across a **block/occupancy sweep**, emitting the
+   same `{points:[…]}` plus occupancy fields. Add `run_cuda_task` to `services/api/worker.py` and a
+   `{kind:"cuda"}` branch to `POST /api/jobs` (reuse the submit/poll plumbing + `lib/runner.ts`).
 
-2. **"MPI halo exchange" as a fifth flagship experiment.** Add it to `EXPERIMENTS`/`Models`/
-   `Measured` in `@vhpce/perf-models` (comm model: latency + bandwidth vs ranks → comm-dominated
-   scaling), an `Explain`/`ExplainMeasured` entry, and a 3D scene (`MpiScene3D` via `Scene3DShell`:
-   ranks as nodes, animated halo/reduce/broadcast messages) plus a Canvas2D fallback in `@vhpce/viz`.
+2. **"GPU Occupancy" as a sixth flagship experiment.** Add it to `EXPERIMENTS`/`Models`/`Measured`
+   in `@vhpce/perf-models` (occupancy model: warps vs registers/shared-mem/block-size → achieved
+   occupancy and the limiter), an `Explain`/`ExplainMeasured` entry, a Canvas2D scene + a 3D scene
+   (`CudaScene3D` via `Scene3DShell`: SM/warp grid, divergence/coalescing). The x-axis becomes
+   block size or active warps (extend `xUnits`).
 
-3. **Generalize the scaling axis to "ranks" and wire measured MPI.** The D3 `drawScaling` and the
-   flagship hard-code "threads"; parameterize the x-axis label/units (`threads` | `ranks`) on the
-   result, point the MPI experiment's `runnerSpec` at `/run-mpi`, and show strong/weak scaling with
-   the ideal line — proving the seam carries a second execution model end-to-end.
+3. **Nsight parsing for measured occupancy.** Parse Nsight Systems/Compute output (or the CUDA
+   occupancy API) in the kernel/driver to populate real occupancy + the limiter (register pressure,
+   shared memory, block size) into the result — proving the seam carries a third execution model
+   (GPU) end-to-end, with a suggested fix. (Nsight Compute on WSL2 may be limited — verify; timing +
+   occupancy-API works regardless.)
 
 ---
 
@@ -188,6 +198,19 @@ Recommended forward path is **P3 (MPI)** — self-contained, reuses the seam and
 - **Preview screenshots can time out on the flagship** (the R3F animation loop keeps the renderer
   busy). Verify with `preview_eval` (read DOM/state, fetch the gateway) instead of `preview_screenshot`.
 - **Model mode is the only offline path now** — Measured (both producers) needs the gateway + Docker.
+- **MPI weak scaling needs a compute-bound kernel.** A plain memory-bound stencil makes ranks
+  contend for shared DRAM bandwidth on one node, so weak scaling *degrades* (the opposite of the
+  lesson). `halo.c` adds a per-cell arithmetic chain (`FLOP`) to push it compute-bound → weak stays
+  ~flat. (The model carries the clean comm-wall lesson; measured shows this node's reality.)
+- **`mpirun` launches occasionally stall.** `mpi-driver.sh` wraps each launch in `timeout -k 5 45`
+  and uses `--bind-to none`, with a prev-value fallback so a missed point never emits `ms:0`
+  (which would divide-by-zero the speedup). Without the per-launch cap a single stall ate the whole
+  300s job timeout.
+- **`vhpce-mpi`'s ENTRYPOINT is the driver**, not the kernel: args are `<mode> <maxranks> <Nbase>
+  <iters>` — don't confuse with `halo`'s `<mode> <Nbase> <iters>` (passing maxranks=Nbase launches a
+  runaway sweep).
+- **`--network none` is fine for single-node MPI** — OpenMPI uses the loopback/shared-memory
+  transport, which works inside the locked-down container (verified).
 - **Spawned PowerShell inherits a stale PATH** — refresh from registry before `node`/`pnpm`
   (snippet in §3). The preview launch config uses absolute `node.exe` + Next's bin for the same reason.
 - **`.gitattributes` forces LF** so `bench-driver.sh`/Dockerfile stay LF (CRLF breaks the container entrypoint).

@@ -38,6 +38,7 @@ export function drawScaling(svgEl: SVGSVGElement, res: ExperimentResult): void {
   svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(6).tickFormat(d3.format("d")) as any);
   svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5) as any);
   svg.append("g").attr("class", "axis").attr("transform", `translate(${W - m.r},0)`).call(d3.axisRight(ye).ticks(4).tickFormat(d3.format(".0%")) as any);
+  svg.append("text").attr("x", (m.l + W - m.r) / 2).attr("y", H - 2).attr("fill", C.dim).attr("font-size", 10).attr("text-anchor", "middle").text(res.xUnits === "ranks" ? "ranks" : "threads");
 }
 
 export function drawRoofline(svgEl: SVGSVGElement, res: ExperimentResult): void {
@@ -204,4 +205,63 @@ const imbalance: SceneFn = (ctx, VW, VH, now, res) => {
   ctx.strokeStyle = "rgba(230,237,243,.5)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x0 + play * scale, top - 2); ctx.lineTo(x0 + play * scale, top + n * (rowH + gapY)); ctx.stroke();
 };
 
-export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance };
+const mpiHalo: SceneFn = (ctx, VW, VH, now, res) => {
+  const p = (res.params.ranks ?? res.params.threads ?? 24) as number;
+  const weak = res.params.mode === "weak";
+  const commPct = res.idlePct ?? 0;
+  const n = Math.min(p, 16);
+  const pad = 34, cy = VH * 0.44;
+  const rad = Math.max(8, Math.min(18, (VW - pad * 2) / (n * 2.4)));
+  const xs = Array.from({ length: n }, (_, i) => (n === 1 ? VW / 2 : pad + (i * (VW - pad * 2)) / (n - 1)));
+  const commCol = commPct > 40 ? C.bad : commPct > 15 ? C.warn : C.good;
+
+  // title
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`${n} ranks · 1-D domain · each trades boundary cells with 2 neighbours`, VW / 2, 22);
+
+  // neighbour links + animated halo packets (both directions)
+  for (let i = 0; i < n - 1; i++) {
+    const a = xs[i], b = xs[i + 1];
+    ctx.strokeStyle = "#1c2940"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a + rad, cy); ctx.lineTo(b - rad, cy); ctx.stroke();
+    const speed = 0.0009 * (1 + commPct / 25);
+    for (let d = 0; d < 2; d++) {
+      const base = (now * speed + i * 0.13 + d * 0.5) % 1;
+      const px = d === 0 ? a + rad + base * (b - a - 2 * rad) : b - rad - base * (b - a - 2 * rad);
+      ctx.fillStyle = commCol; ctx.shadowColor = commCol; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(px, cy, 3.2, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+    }
+  }
+  // ring wrap-around link (last ↔ first), drawn as a faint arc over the top
+  if (n > 2) {
+    ctx.strokeStyle = "#16223a"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
+    ctx.beginPath(); ctx.moveTo(xs[n - 1], cy - rad); ctx.quadraticCurveTo(VW / 2, cy - VH * 0.34, xs[0], cy - rad); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // rank nodes
+  for (let i = 0; i < n; i++) {
+    ctx.beginPath(); ctx.arc(xs[i], cy, rad, 0, 7);
+    ctx.fillStyle = "#0c1320"; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = C.accent; ctx.stroke();
+    ctx.fillStyle = C.accent; ctx.font = "600 10px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("r" + i, xs[i], cy);
+  }
+  ctx.textBaseline = "alphabetic";
+
+  // comm-fraction bar
+  const barY = cy + rad + 34, barW = VW - pad * 2, barH = 14;
+  rr(ctx, pad, barY, barW, barH, 6); ctx.fillStyle = "#0a0f18"; ctx.fill();
+  rr(ctx, pad, barY, barW * Math.min(1, commPct / 100), barH, 6); ctx.fillStyle = commCol; ctx.globalAlpha = 0.55; ctx.fill(); ctx.globalAlpha = 1;
+  ctx.fillStyle = C.muted; ctx.font = "10px ui-monospace, monospace"; ctx.textAlign = "left";
+  ctx.fillText(`communication ${fmt(commPct, 0)}% of runtime`, pad, barY - 6);
+
+  ctx.fillStyle = commCol; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    weak
+      ? "WEAK scaling — grid grows with ranks; per-rank work fixed, efficiency stays high"
+      : "STRONG scaling — fixed grid; comm fraction grows with ranks → speedup saturates",
+    VW / 2, barY + barH + 22,
+  );
+};
+
+export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo };

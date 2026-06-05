@@ -72,6 +72,41 @@ async def run_bench_task(ctx, exp, variant, maxt):
     return data
 
 
+async def run_mpi_task(ctx, variant, maxranks):
+    """MPI halo-exchange rank sweep: `docker run vhpce-mpi <variant> <maxranks> <Nbase> <iters>`.
+    Single node, shared-memory transport — no network needed."""
+    if variant not in settings.ALLOWED_MPI:
+        return {"error": "badrequest", "message": f"unknown mpi variant: {variant}"}
+    maxranks = max(1, min(int(maxranks), 64))
+    cmd = [
+        "docker", "run", "--rm",
+        "--network", "none",
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--memory", "2g", "--memory-swap", "2g",
+        "--pids-limit", "256",
+        "--read-only", "--tmpfs", "/tmp:rw,exec,size=256m",
+        settings.MPI_IMAGE,
+        variant, str(maxranks), str(settings.HALO_NBASE), str(settings.HALO_ITERS),
+    ]
+    try:
+        rc, out, err = await _run(cmd, timeout=settings.MPI_RUN_TIMEOUT)
+    except RuntimeError as e:
+        return {"error": "run", "message": str(e)}
+    if rc != 0:
+        return {"error": "run", "message": (err.strip()[-1500:] or f"rc={rc}")}
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return {"error": "run", "message": "bad output from mpi container"}
+    if "error" not in data:
+        data["source"] = "measured"
+        data["cores"] = os.cpu_count()
+        data["machine"] = "docker-local"
+        await ctx["redis"].set(f"mpi:{variant}:{maxranks}", json.dumps(data), ex=settings.BENCH_CACHE_TTL)
+    return data
+
+
 async def run_code_task(ctx, source, threads, reps, profile):
     """Arbitrary user OpenMP C in the locked-down runner image (source via stdin).
     Ported from the stdlib runner's run_user_code — same flags, same JSON shape."""
@@ -109,7 +144,7 @@ async def run_code_task(ctx, source, threads, reps, profile):
 
 
 class WorkerSettings:
-    functions = [run_bench_task, run_code_task]
+    functions = [run_bench_task, run_code_task, run_mpi_task]
     redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
     max_jobs = 1                 # one benchmark container at a time → clean timing
     keep_result = 3600           # keep job results for an hour for polling

@@ -67,3 +67,10 @@ services:
     build:
       context: .
       dockerfile: runner.Dockerfile
+
+  mpi:
+    profiles: ["build"]
+    image: vhpce-mpi
+    build:
+      context: ../..
+      dockerfile: infra/docker/mpi.Dockerfile

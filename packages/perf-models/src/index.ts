@@ -18,6 +18,7 @@ export const TRIAD_AI = 2 / 24; // triad: 2 FLOPs per 24 bytes moved
 const range1 = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
 
 type Extra = (cur: SweepPoint, sweep: SweepPoint[]) => Partial<ExperimentResult>;
+type BuildOpts = { scaling?: "strong" | "weak"; xUnits?: "threads" | "ranks" };
 
 function buildResult(
   expId: string,
@@ -25,14 +26,23 @@ function buildResult(
   timeOf: (p: number) => number,
   extra: Extra,
   source: "model" | "measured" = "model",
+  opts: BuildOpts = {},
 ): ExperimentResult {
+  const scaling = opts.scaling ?? "strong";
+  const xUnits = opts.xUnits ?? "threads";
   const t1 = timeOf(1);
   const sweep: SweepPoint[] = range1(MAXP).map((p) => {
     const t = timeOf(p);
-    const sp = t1 / t;
-    return { x: p, time: t, speedup: sp, efficiency: sp / p };
+    const ratio = t1 / t;
+    // Strong scaling (fixed work): speedup = t1/t(p). Weak scaling (work grows ∝ p):
+    // the meaningful metrics are *scaled* speedup p·t1/t(p) and efficiency t1/t(p),
+    // both of which still render against the y=x ideal and the right-axis efficiency.
+    const speedup = scaling === "weak" ? p * ratio : ratio;
+    const efficiency = scaling === "weak" ? ratio : ratio / p;
+    return { x: p, time: t, speedup, efficiency };
   });
-  const cur = sweep[clamp(params.threads, 1, MAXP) - 1];
+  const xparam = params.ranks ?? params.threads;
+  const cur = sweep[clamp(xparam, 1, MAXP) - 1];
   return {
     experimentId: expId,
     source,
@@ -41,6 +51,7 @@ function buildResult(
     sweep,
     current: cur,
     metrics: [],
+    xUnits,
     ...extra(cur, sweep),
   };
 }
@@ -61,7 +72,11 @@ export const EXPERIMENTS = [
   { id: "synchronization", name: "Synchronization", scene: "thread timeline · lock serialization" },
   { id: "bandwidth", name: "Bandwidth Saturation", scene: "memory bus · roofline" },
   { id: "imbalance", name: "Load Imbalance", scene: "thread timeline · idle tails" },
+  { id: "mpiHalo", name: "MPI Halo Exchange", scene: "ranks · halo exchange · comm wall" },
 ];
+
+// MPI halo model: compute that scales with ranks + a communication term that grows ~log(ranks).
+export const HALO = { T1: 1000, Tc0: 8, Tc1: 18 };
 
 /* ===================== Producer A — models ===================== */
 export const Models: Record<string, (p: any) => ExperimentResult> = {
@@ -148,6 +163,29 @@ export const Models: Record<string, (p: any) => ExperimentResult> = {
       };
     });
   },
+  mpiHalo(params) {
+    const weak = params.mode === "weak";
+    const comm = (p: number) => HALO.Tc0 + HALO.Tc1 * Math.log2(p || 1);
+    const compute = (p: number) => (weak ? HALO.T1 : HALO.T1 / p); // weak: fixed work per rank
+    const timeOf = (p: number) => compute(p) + comm(p);
+    return buildResult("mpiHalo", params, timeOf, (cur, sw) => {
+      const commPct = (comm(cur.x) / cur.time) * 100;
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      return {
+        peak,
+        idlePct: commPct,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: weak ? "good" : "warn" },
+          { k: weak ? "Scaled speedup" : "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Comm fraction", v: fmt(commPct, 0) + "%", tone: commPct < 15 ? "good" : commPct < 40 ? "warn" : "bad" },
+          weak
+            ? { k: "Ideal (linear)", v: cur.x + "×", tone: "accent" }
+            : { k: "Comm wall", v: "≈ " + fmt(peak.speedup, 1) + "×", tone: "accent" },
+        ],
+      };
+    }, "model", { scaling: weak ? "weak" : "strong", xUnits: "ranks" });
+  },
 };
 
 /* ===================== Producer B — measured adapters ===================== */
@@ -227,5 +265,25 @@ export const Measured: Record<string, (p: any, data: RunnerData) => ExperimentRe
         ],
       };
     }, "measured");
+  },
+  mpiHalo(params, data) {
+    const weak = params.mode === "weak";
+    return buildResult("mpiHalo", params, tLookup(data), (cur, sw) => {
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      const lost = Math.max(0, (1 - cur.efficiency) * 100); // gap to ideal = overhead/comm
+      return {
+        peak,
+        idlePct: lost,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: weak ? "good" : "warn" },
+          { k: weak ? "Scaled speedup" : "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.6 ? "good" : cur.efficiency > 0.35 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.6 ? "good" : cur.efficiency > 0.35 ? "warn" : "bad" },
+          { k: weak ? "Overhead" : "Lost to comm", v: fmt(lost, 0) + "%", tone: lost < 20 ? "good" : lost < 50 ? "warn" : "bad" },
+          weak
+            ? { k: "Ideal (linear)", v: cur.x + "×", tone: "accent" }
+            : { k: "Peak speedup", v: fmt(peak.speedup, 1) + "× @ " + peak.x + "r", tone: "accent" },
+        ],
+      };
+    }, "measured", { scaling: weak ? "weak" : "strong", xUnits: "ranks" });
   },
 };

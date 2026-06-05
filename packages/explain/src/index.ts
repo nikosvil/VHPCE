@@ -81,6 +81,24 @@ export const Explain: Record<string, ExplainFn> = {
       exp: `Imbalance factor → ~1.05, idle time → near 0, speedup approaches ${c.x}×.`,
     };
   },
+  mpiHalo(r) {
+    const c = r.current, weak = r.params.mode === "weak", commPct = r.idlePct ?? 0, peak = r.peak!;
+    if (weak)
+      return {
+        sev: c.efficiency > 0.7 ? "info" : "warn",
+        what: `Weak scaling: as the grid grows with the ranks, scaled speedup reaches <b>${fmt(c.speedup, 1)}×</b> on ${c.x} ranks at <b>${fmt(c.efficiency * 100, 0)}% efficiency</b> — close to ideal.`,
+        why: `Every rank keeps the <b>same local work</b>, so compute time is constant; only the halo exchange grows (~log p), a small ${fmt(commPct, 0)}% of the runtime. Efficiency barely drops.`,
+        how: `Already the scalable regime. Switch to <b>strong</b> to watch a fixed problem hit the communication wall.`,
+        exp: `This is how HPC fills a big machine — size the problem to the ranks and efficiency stays flat.`,
+      };
+    return {
+      sev: "warn",
+      what: `Strong scaling: speedup climbs then <b>saturates near ${fmt(peak.speedup, 1)}×</b> — at ${c.x} ranks you get <b>${fmt(c.speedup, 1)}×</b> (${fmt(c.efficiency * 100, 0)}% efficiency), and more ranks barely help.`,
+      why: `The global grid is <b>fixed</b>, so per-rank compute shrinks (∝ 1/p) while the halo exchange stays roughly constant and its <b>latency grows ~log(p)</b>. Communication is now <b>${fmt(commPct, 0)}%</b> of the time — the comm wall.`,
+      how: `Either <b>grow the problem with the machine</b> (switch to weak scaling) or cut communication — larger subdomains, fewer/aggregated messages, comm/compute overlap.`,
+      exp: `Weak scaling holds efficiency near ideal; on a real multi-node cluster the strong-scaling wall is even sharper than on one shared-memory node.`,
+    };
+  },
 };
 
 export const ExplainMeasured: Record<string, ExplainFn> = {
@@ -148,6 +166,24 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `The triangular loop gives late-indexed threads far more work; with fixed static chunks they finish last while early threads idle. Total time = the slowest thread.`,
       how: `Use <b>schedule(dynamic)</b> or <b>guided</b> so idle threads grab the remaining rows.`,
       exp: `Dynamic rebalances the load — measure the speedup climb on the same cores.`,
+    };
+  },
+  mpiHalo(r) {
+    const c = r.current, weak = r.params.mode === "weak", eff = c.efficiency * 100, lost = r.idlePct ?? 0;
+    if (weak)
+      return {
+        sev: eff > 60 ? "info" : "warn",
+        what: `Measured (weak): on ${c.x} ranks the grid grows with the machine — scaled speedup <b>${fmt(c.speedup, 1)}×</b>, efficiency <b>${fmt(eff, 0)}%</b>.`,
+        why: `Per-rank work is constant, so wall time stays roughly flat as ranks (and the global problem) grow; only halo exchange adds a little (~${fmt(lost, 0)}% overhead).`,
+        how: `This is the scalable regime. Switch to <b>strong</b> to measure the fixed-problem comm wall on this node.`,
+        exp: `Weak scaling is how you keep efficiency high as you add hardware.`,
+      };
+    return {
+      sev: eff > 40 ? "warn" : "critical",
+      what: `Measured (strong): a fixed grid reaches <b>${fmt(c.speedup, 1)}×</b> on ${c.x} ranks (${fmt(eff, 0)}% efficiency); ~${fmt(lost, 0)}% is lost to communication and coordination.`,
+      why: `With the problem fixed, each rank computes less while halo exchange and launch/coordination overhead don't shrink — so efficiency falls as ranks rise.`,
+      how: `Grow the problem with the ranks (weak scaling) or cut communication. <b>Note:</b> on one node MPI uses shared memory, so this wall is gentler than on a real multi-node cluster.`,
+      exp: `Flip to weak scaling and watch efficiency stay high on the very same ranks.`,
     };
   },
 };

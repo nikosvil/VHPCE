@@ -44,6 +44,8 @@ export interface ExperimentResult {
   sweep: SweepPoint[];
   current: SweepPoint;
   metrics: Metric[];
+  /** x-axis unit for the sweep — "threads" (OpenMP) or "ranks" (MPI). Defaults to threads. */
+  xUnits?: "threads" | "ranks";
 
   // experiment-specific extras (optional; populated per experiment)
   peak?: SweepPoint;

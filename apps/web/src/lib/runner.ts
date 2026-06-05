@@ -8,7 +8,8 @@ export const API = process.env.NEXT_PUBLIC_VHPCE_API || "http://localhost:8000";
 
 export type JobBody =
   | { kind: "bench"; exp: string; variant: string; maxthreads: number }
-  | { kind: "code"; source: string; threads?: number[]; reps?: number; profile?: boolean };
+  | { kind: "code"; source: string; threads?: number[]; reps?: number; profile?: boolean }
+  | { kind: "mpi"; variant: string; maxranks: number };
 
 export type Phase = "queued" | "running";
 
