@@ -67,7 +67,12 @@ class MpiJob(BaseModel):
     maxranks: int = 24
 
 
-JobSubmit = Annotated[Union[BenchJob, CodeJob, MpiJob], Field(discriminator="kind")]
+class CudaJob(BaseModel):
+    kind: Literal["cuda"]
+    variant: str               # "light" | "heavy"
+
+
+JobSubmit = Annotated[Union[BenchJob, CodeJob, MpiJob, CudaJob], Field(discriminator="kind")]
 
 
 @app.post("/api/jobs")
@@ -92,6 +97,15 @@ async def submit(job: JobSubmit):
         if cached:
             return {"id": None, "status": "done", "result": json.loads(cached), "cached": True}
         j = await redis.enqueue_job("run_mpi_task", job.variant, maxr)
+        return {"id": j.job_id, "status": "queued"}
+    if job.kind == "cuda":
+        if job.variant not in settings.ALLOWED_CUDA:
+            return {"id": None, "status": "error",
+                    "result": {"error": "badrequest", "message": f"unknown cuda variant: {job.variant}"}}
+        cached = await redis.get(f"cuda:{job.variant}")
+        if cached:
+            return {"id": None, "status": "done", "result": json.loads(cached), "cached": True}
+        j = await redis.enqueue_job("run_cuda_task", job.variant)
         return {"id": j.job_id, "status": "queued"}
     # kind == "code"
     j = await redis.enqueue_job("run_code_task", job.source, job.threads, job.reps, job.profile)

@@ -1,10 +1,10 @@
 # VHPCE — Progress Snapshot
 
-_Last updated: 2026-06-04 · branch `mpi-phase` (off `cloud-phase`)_
+_Last updated: 2026-06-04 · branch `cuda-phase` (off `mpi-phase` → `cloud-phase`)_
 
 A working build of **Visual HPC for Engineers** — an interactive performance laboratory.
-**Phases P0, P1, P2, the Cloud Phase (FastAPI gateway + Redis/Arq queue), and P3 (MPI) are complete.**
-This file is the resume point: what's done, how to run it, what changed, and the next concrete steps.
+**Phases P0, P1, P2, the Cloud Phase (FastAPI gateway + Redis/Arq queue), P3 (MPI), and P4 (GPU/CUDA)
+are complete.** This file is the resume point: what's done, how to run it, what changed, and next steps.
 
 > The design contract lives in `docs/` (`01-architecture.md` … `06-data-contracts.md`) and the
 > running decisions log is in `README.md`. This file is the operational summary.
@@ -20,7 +20,7 @@ This file is the resume point: what's done, how to run it, what changed, and the
 | **P2** | Code Playground (arbitrary OpenMP C in a locked-down Docker container) + cachegrind | ✅ **complete for local use** |
 | **Cloud** | FastAPI gateway + Redis/Arq job queue; both producers async submit/poll; stdlib runner retired | ✅ **done** |
 | **P3** | MPI execution (`{kind:"mpi"}` → `vhpce-mpi`) + "MPI Halo Exchange" experiment (strong vs weak) | ✅ **done** |
-| P4 | GPU/CUDA (RTX 5060, local via WSL2 passthrough) + occupancy | ⬜ not started |
+| **P4** | GPU/CUDA (`{kind:"cuda"}` → `vhpce-cuda`, RTX 5060) + "GPU Occupancy" experiment (register pressure) | ✅ **done** |
 | P5 | Engineering modules, gamification, classrooms, cloud scale (incl. the deferred queue) | ⬜ not started |
 
 ### The core idea that holds it together
@@ -45,6 +45,13 @@ Playground code) go through one async backend; **Model mode is the only offline 
   grows; weak (grid ∝ ranks) holds efficiency near ideal. Measured runs go through the gateway's
   `{kind:"mpi"}` job → `vhpce-mpi` (OpenMPI, `mpirun` rank sweep). The model shows the vivid
   comm wall; measured shows this one node's shared-memory reality (gentler) — the seam carries both.
+- **GPU Occupancy** (P4) — a CUDA kernel swept across **threads/block (32→1024)** on the **RTX 5060**,
+  with a **light vs heavy register** toggle. Heavy is register-limited (the SM's register file fills
+  before its warp slots → low occupancy, worse at large blocks); light restores occupancy. The chart
+  is a dedicated `drawOccupancy` (occupancy + performance vs block size, best block marked). Measured
+  occupancy is **real** — the kernel queries the CUDA Occupancy API on the device (no Nsight needed).
+  Gateway `{kind:"cuda"}` job → `docker run --gpus all vhpce-cuda`. GPU passthrough into the container
+  is verified working.
 - **Ask the AI** (`apps/web/src/app/api/ask/route.ts` + `AskAI.tsx`) — optional Claude panel
   (`claude-opus-4-8`, streaming), **grounded on the deterministic findings**; key via
   `ANTHROPIC_API_KEY` or a per-tab bring-your-own key; built-in explanations always on.
@@ -115,7 +122,7 @@ vhpce/
 │           ├─ Playground.tsx      Monaco editor + run/profile + result + cache panel
 │           ├─ AskAI.tsx           streaming LLM panel (grounded)
 │           ├─ Nav.tsx             top nav (Flagship | Playground)
-│           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance,Mpi}Scene3D
+│           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance,Mpi,Cuda}Scene3D
 │
 ├─ packages/                       shared TS (transpiled by Next, no build step)
 │  ├─ profile-schema/src/index.ts  the seam: ExperimentResult/Explanation types + fmt/clamp
@@ -125,11 +132,11 @@ vhpce/
 │
 ├─ services/
 │  ├─ api/                         Producer B gateway (Cloud Phase)
-│  │  ├─ app.py                    FastAPI: /api/health, POST /api/jobs ({bench|code|mpi}), GET /api/jobs/{id}
-│  │  ├─ worker.py                 Arq worker (max_jobs=1): run_bench_task / run_code_task / run_mpi_task → docker run
+│  │  ├─ app.py                    FastAPI: /api/health, POST /api/jobs ({bench|code|mpi|cuda}), GET /api/jobs/{id}
+│  │  ├─ worker.py                 Arq worker (max_jobs=1): run_bench/code/mpi/cuda_task → docker run
 │  │  ├─ settings.py · requirements.txt · Dockerfile · README.md
 │  └─ runner/
-│     └─ experiments/             bench.c (vhpce-bench, OpenMP) · halo.c (vhpce-mpi, MPI 1-D stencil)
+│     └─ experiments/             bench.c (vhpce-bench) · halo.c (vhpce-mpi) · occupancy.cu (vhpce-cuda)
 │
 └─ infra/docker/
    ├─ compose.yml                  redis + api + worker; build profile tags vhpce-bench/runner/mpi
@@ -137,7 +144,8 @@ vhpce/
    ├─ bench-driver.sh              compile-from-stdin → thread sweep (best-of-N) → JSON [+ cachegrind]
    ├─ bench.Dockerfile             bakes bench.c (-march=native) → vhpce-bench, ENTRYPOINT bench
    ├─ mpi.Dockerfile               OpenMPI; bakes halo.c (mpicc) → vhpce-mpi, ENTRYPOINT mpi-driver.sh
-   └─ mpi-driver.sh                rank sweep: mpirun --oversubscribe -np k (best-of-2) → JSON
+   ├─ mpi-driver.sh                rank sweep: mpirun --oversubscribe -np k (best-of-2) → JSON
+   └─ cuda.Dockerfile              CUDA devel; bakes occupancy.cu (nvcc, sm_120/PTX) → vhpce-cuda
 ```
 
 ---
@@ -152,29 +160,25 @@ vhpce/
 
 ---
 
-## 6. Next 3 implementation steps
+## 6. Next implementation steps
 
-Recommended forward path is **P4 (GPU / CUDA)** — the RTX 5060 + CUDA passthrough is confirmed in
-WSL, and it reuses the seam, the gateway job pattern, and `Scene3DShell` exactly like P3 did.
+Phases P0–P4 + the Cloud gateway are all done — four execution models (OpenMP, arbitrary code, MPI,
+CUDA) flow through one seam. The remaining roadmap is **P5** (domains, gamification, classrooms,
+cloud scale). Candidate next steps, in rough priority:
 
-1. **CUDA execution path (a fourth job kind).** Add a `vhpce-cuda` image
-   (`infra/docker/cuda.Dockerfile`: CUDA toolkit / `nvcc`; the container needs `--gpus all` so the
-   worker's `docker run` must pass GPU access — verify Docker Desktop GPU passthrough first). Bake a
-   sample CUDA kernel (e.g. SAXPY/stencil); time it across a **block/occupancy sweep**, emitting the
-   same `{points:[…]}` plus occupancy fields. Add `run_cuda_task` to `services/api/worker.py` and a
-   `{kind:"cuda"}` branch to `POST /api/jobs` (reuse the submit/poll plumbing + `lib/runner.ts`).
+1. **Deeper GPU lessons reusing the cuda path.** Add more `{kind:"cuda"}` variants/experiments —
+   memory **coalescing** (coalesced vs strided), **warp divergence**, shared-memory bank conflicts —
+   each a new kernel in `occupancy.cu`/a sibling + an `EXPERIMENTS` entry. The image/gateway/scene
+   plumbing already exists.
 
-2. **"GPU Occupancy" as a sixth flagship experiment.** Add it to `EXPERIMENTS`/`Models`/`Measured`
-   in `@vhpce/perf-models` (occupancy model: warps vs registers/shared-mem/block-size → achieved
-   occupancy and the limiter), an `Explain`/`ExplainMeasured` entry, a Canvas2D scene + a 3D scene
-   (`CudaScene3D` via `Scene3DShell`: SM/warp grid, divergence/coalescing). The x-axis becomes
-   block size or active warps (extend `xUnits`).
+2. **Engineering-domain modules (P5).** FEM/FDTD/CFD/stencil/FFT mini-labs with interactive domain
+   decomposition and convergence plots, built on the same `ProfileResult` seam and the gateway job
+   kinds (OpenMP/MPI/CUDA) already in place.
 
-3. **Nsight parsing for measured occupancy.** Parse Nsight Systems/Compute output (or the CUDA
-   occupancy API) in the kernel/driver to populate real occupancy + the limiter (register pressure,
-   shared memory, block size) into the result — proving the seam carries a third execution model
-   (GPU) end-to-end, with a suggested fix. (Nsight Compute on WSL2 may be limited — verify; timing +
-   occupancy-API works regardless.)
+3. **Gamification + classrooms + true cloud scale (P5).** "Speed up this code" challenges with
+   scores/badges; multi-user — raise the worker's `max_jobs` / add replicas (the queue already
+   supports it), move sandboxes to K8s Jobs, and unlock **true PMU counters** (perf/LIKWID) on a
+   bare-metal/cloud node (WSL2 has no host PMU; cachegrind + the occupancy API are the local stand-ins).
 
 ---
 
@@ -211,6 +215,18 @@ WSL, and it reuses the seam, the gateway job pattern, and `Scene3DShell` exactly
   runaway sweep).
 - **`--network none` is fine for single-node MPI** — OpenMPI uses the loopback/shared-memory
   transport, which works inside the locked-down container (verified).
+- **GPU passes into containers** via `docker run --gpus all` (Docker Desktop has the `nvidia` runtime
+  registered; the RTX 5060 shows up as cc 12.0 / sm_120 inside the container). The locked-down flags
+  (`--cap-drop ALL --network none --read-only` + tmpfs `/tmp`) coexist with `--gpus all`; CUDA's JIT
+  cache needs a writable dir → `CUDA_CACHE_PATH=/tmp/.nv`.
+- **sm_120 (Blackwell) needs a recent toolkit.** `cuda.Dockerfile` tries `nvcc -arch=sm_120` and falls
+  back to `compute_90` **PTX** (the new driver JITs it forward to sm_120). The CUDA **Occupancy API**
+  queries the real device, so measured occupancy is accurate regardless of the compile arch.
+- **The CUDA devel image is ~5–7 GB** (one-time pull, several minutes). Occupancy is real (Occupancy
+  API); Nsight Compute counters on WSL2 remain future work.
+- **GPU occupancy needs its own chart** (`drawOccupancy`) and result builder — block size (32→1024)
+  is a different x-domain than threads/ranks (1→24), so the cuda experiment does **not** use
+  `buildResult` (mirrors how bandwidth has the roofline).
 - **Spawned PowerShell inherits a stale PATH** — refresh from registry before `node`/`pnpm`
   (snippet in §3). The preview launch config uses absolute `node.exe` + Next's bin for the same reason.
 - **`.gitattributes` forces LF** so `bench-driver.sh`/Dockerfile stay LF (CRLF breaks the container entrypoint).

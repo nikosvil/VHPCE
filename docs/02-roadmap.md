@@ -119,6 +119,17 @@ divergence, coalescing, shared memory, register pressure); PCIe transfer view.
 **DoD:** a CUDA kernel run on the RTX 5060 reports occupancy with an explanation of the limiter
 (e.g., register pressure) and a suggested fix.
 
+**Status (2026-06-04) — landed.** A sixth flagship experiment, **GPU Occupancy**: a CUDA kernel swept
+across **threads/block (32→1024)** on the **RTX 5060** (sm_120) through the gateway's `{kind:"cuda"}`
+job → `docker run --gpus all vhpce-cuda` (nvcc, sm_120 native with a `compute_90` PTX-JIT fallback).
+The teaching contrast is **register pressure**: the heavy kernel (104 registers/thread, measured) is
+**register-limited** (~33% occupancy; large blocks can't even launch — "too many resources"), while
+the light kernel (10 regs) reaches ~100%. The DoD is met — it reports achieved occupancy, names the
+**limiter** (registers), and suggests the fix (cut registers / `__launch_bounds__` / pick the
+occupancy-optimal block). **Occupancy is measured for real** via the CUDA Occupancy API on the device
+(Nsight Compute on WSL2 remains future work); the GPU-specific x-domain gets a dedicated
+`drawOccupancy` chart. Coalescing / divergence / shared-memory and the PCIe view remain future work.
+
 ## Phase 5 — Domains, gamification, classrooms, cloud scale
 
 Deliverables: engineering modules (FEM, FDTD, CFD, sparse solvers, FFT, multigrid, stencils)

@@ -74,3 +74,10 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/mpi.Dockerfile
+
+  cuda:
+    profiles: ["build"]
+    image: vhpce-cuda
+    build:
+      context: ../..
+      dockerfile: infra/docker/cuda.Dockerfile

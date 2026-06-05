@@ -4,7 +4,7 @@
  * components own the refs + rAF loop and call these. (Three.js hero scenes land next.)
  */
 import * as d3 from "d3";
-import { type ExperimentResult, fmt } from "@vhpce/profile-schema";
+import { type ExperimentResult, type SweepPoint, fmt } from "@vhpce/profile-schema";
 
 export const C = {
   accent: "#4cc9f0", accent2: "#b388ff", good: "#3ddc97",
@@ -64,6 +64,32 @@ export function drawRoofline(svgEl: SVGSVGElement, res: ExperimentResult): void 
   svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(5, "~g") as any);
   svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4, "~g") as any);
   svg.append("text").attr("x", W / 2).attr("y", H - 4).attr("fill", C.dim).attr("font-size", 10).attr("text-anchor", "middle").text("arithmetic intensity (FLOP/byte)");
+}
+
+export function drawOccupancy(svgEl: SVGSVGElement, res: ExperimentResult): void {
+  const svg = d3.select(svgEl);
+  svg.selectAll("*").remove();
+  const W = svgEl.clientWidth || 560, H = svgEl.clientHeight || 260, m = { t: 14, r: 16, b: 36, l: 44 };
+  const sw = res.sweep;
+  const x = d3.scaleLinear().domain([0, 1024]).range([m.l, W - m.r]);
+  const y = d3.scaleLinear().domain([0, 1]).range([H - m.b, m.t]);
+  svg.append("g").selectAll("line").data(y.ticks(5)).join("line").attr("class", "grid-line")
+    .attr("x1", m.l).attr("x2", W - m.r).attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
+  if (res.optimalBlock) {
+    svg.append("line").attr("x1", x(res.optimalBlock)).attr("x2", x(res.optimalBlock)).attr("y1", m.t).attr("y2", H - m.b)
+      .attr("stroke", C.good).attr("stroke-width", 1.5).attr("stroke-dasharray", "4 4").attr("opacity", 0.5);
+    svg.append("text").attr("x", x(res.optimalBlock)).attr("y", m.t + 9).attr("fill", C.good).attr("font-size", 9).attr("text-anchor", "middle").text("best");
+  }
+  const linePerf = d3.line<SweepPoint>().x((d) => x(d.x)).y((d) => y(d.speedup)).curve(d3.curveMonotoneX);
+  svg.append("path").datum(sw).attr("fill", "none").attr("stroke", C.accent2).attr("stroke-width", 1.5).attr("opacity", 0.7).attr("d", linePerf as any);
+  const lineOcc = d3.line<SweepPoint>().x((d) => x(d.x)).y((d) => y(d.occ ?? 0)).curve(d3.curveMonotoneX);
+  svg.append("path").datum(sw).attr("fill", "none").attr("stroke", C.accent).attr("stroke-width", 2.5).attr("d", lineOcc as any);
+  const cur = res.current;
+  svg.append("line").attr("x1", x(cur.x)).attr("x2", x(cur.x)).attr("y1", m.t).attr("y2", H - m.b).attr("stroke", "#2a3850").attr("stroke-dasharray", "3 3");
+  svg.append("circle").attr("cx", x(cur.x)).attr("cy", y(cur.occ ?? 0)).attr("r", 5).attr("fill", C.accent).attr("stroke", "#04121a").attr("stroke-width", 2);
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues([128, 256, 384, 512, 640, 768, 896, 1024]).tickFormat(d3.format("d")) as any);
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickFormat(d3.format(".0%")) as any);
+  svg.append("text").attr("x", (m.l + W - m.r) / 2).attr("y", H - 2).attr("fill", C.dim).attr("font-size", 10).attr("text-anchor", "middle").text("threads / block");
 }
 
 /* =============================== Canvas scenes =============================== */
@@ -264,4 +290,38 @@ const mpiHalo: SceneFn = (ctx, VW, VH, now, res) => {
   );
 };
 
-export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo };
+const cuda: SceneFn = (ctx, VW, VH, now, res) => {
+  const occ = res.occupancy ?? res.current.efficiency ?? 0;
+  const heavy = res.params.variant === "heavy";
+  const maxWarps = 48;
+  const activeWarps = Math.round(occ * maxWarps);
+  const col = occ > 0.66 ? C.good : occ > 0.4 ? C.warn : C.bad;
+  const limiter = res.limiter || "";
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`one SM · ${maxWarps} warp slots · ${activeWarps} active (${Math.round(occ * 100)}% occupancy)`, VW / 2, 22);
+
+  const cols = 8, rows = Math.ceil(maxWarps / cols), pad = 30, gridTop = 40, gap = 6;
+  const cw = (VW - pad * 2 - (cols - 1) * gap) / cols;
+  const ch = Math.min(26, cw * 0.62);
+  for (let i = 0; i < maxWarps; i++) {
+    const r = Math.floor(i / cols), c = i % cols;
+    const cx = pad + c * (cw + gap), cy = gridTop + r * (ch + gap);
+    rr(ctx, cx, cy, cw, ch, 4);
+    if (i < activeWarps) {
+      ctx.fillStyle = col; ctx.globalAlpha = 0.25 + 0.22 * Math.sin(now / 380 + i * 0.5); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke();
+    } else {
+      ctx.fillStyle = "#0a0f18"; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = "#1c2940"; ctx.stroke();
+      ctx.strokeStyle = "#26344a"; ctx.beginPath(); ctx.moveTo(cx + 4, cy + 4); ctx.lineTo(cx + cw - 4, cy + ch - 4); ctx.stroke();
+    }
+  }
+  const by = gridTop + rows * (ch + gap) + 18;
+  ctx.fillStyle = col; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    heavy ? `register pressure caps occupancy — limiter: ${limiter}` : "low register pressure — warps fill the SM",
+    VW / 2, by,
+  );
+};
+
+export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo, cuda };

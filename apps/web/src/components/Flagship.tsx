@@ -6,12 +6,13 @@ import SynchronizationScene3D from "./scenes/SynchronizationScene3D";
 import BandwidthScene3D from "./scenes/BandwidthScene3D";
 import ImbalanceScene3D from "./scenes/ImbalanceScene3D";
 import MpiScene3D from "./scenes/MpiScene3D";
+import CudaScene3D from "./scenes/CudaScene3D";
 import AskAI from "./AskAI";
 import {
   Models, Measured, runnerSpec, EXPERIMENTS, MAXP, TRIAD_AI,
 } from "@vhpce/perf-models";
 import { Explain, ExplainMeasured } from "@vhpce/explain";
-import { drawScaling, drawRoofline, scenes } from "@vhpce/viz";
+import { drawScaling, drawRoofline, drawOccupancy, scenes } from "@vhpce/viz";
 import { fmt, type ExperimentResult, type RunnerData, type Explanation } from "@vhpce/profile-schema";
 import { health, runJob } from "../lib/runner";
 
@@ -21,6 +22,7 @@ const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null 
   bandwidth: BandwidthScene3D,
   imbalance: ImbalanceScene3D,
   mpiHalo: MpiScene3D,
+  cuda: CudaScene3D,
 };
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, "");
@@ -32,7 +34,9 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
   const metrics = r.metrics.map((m) => `${m.k} ${m.v}`).join("; ");
   return [
     `Experiment: ${name} (${mode} data; source=${r.source}).`,
-    `Current point: ${c.x} of 24 ${r.xUnits === "ranks" ? "ranks" : "threads"} — speedup ${fmt(c.speedup, 2)}×, efficiency ${fmt(c.efficiency * 100, 0)}%.`,
+    r.xUnits === "block"
+      ? `Current point: ${c.x} threads/block — occupancy ${fmt((r.occupancy ?? c.efficiency) * 100, 0)}%, performance ${fmt(c.speedup * 100, 0)}% of the sweep's best (limiter: ${r.limiter ?? "n/a"}).`
+      : `Current point: ${c.x} of 24 ${r.xUnits === "ranks" ? "ranks" : "threads"} — speedup ${fmt(c.speedup, 2)}×, efficiency ${fmt(c.efficiency * 100, 0)}%.`,
     `On-screen metrics: ${metrics}.`,
     `Deterministic finding:`,
     `- What: ${stripHtml(e.what)}`,
@@ -42,7 +46,7 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
   ].join("\n");
 }
 
-type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo";
+type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda";
 type Mode = "model" | "measured";
 
 const DEFAULT_PARAMS: Record<ExpId, any> = {
@@ -51,6 +55,7 @@ const DEFAULT_PARAMS: Record<ExpId, any> = {
   bandwidth: { threads: 24, ai: 0.1 },
   imbalance: { threads: 24, sched: "static" },
   mpiHalo: { ranks: 24, mode: "strong" },
+  cuda: { blockSize: 256, variant: "heavy" },
 };
 
 export default function Flagship() {
@@ -75,6 +80,7 @@ export default function Flagship() {
   const measured = mode === "measured";
   const use3D = view === "3d";
   const Scene3D = SCENES_3D[exp];
+  const isCuda = exp === "cuda";
   const xKey = exp === "mpiHalo" ? "ranks" : "threads";   // degree-of-parallelism param
   const xLabel = exp === "mpiHalo" ? "Ranks" : "Threads";
   const xUnits = result?.xUnits === "ranks" ? "ranks" : "threads";
@@ -103,14 +109,17 @@ export default function Flagship() {
       return;
     }
     const isMpi = exp === "mpiHalo";
+    const isCuda = exp === "cuda";
     const { bexp, variant } = runnerSpec(exp, cp);
-    const key = isMpi ? "mpi/" + cp.mode : bexp + "/" + variant;
+    const key = isCuda ? "cuda/" + cp.variant : isMpi ? "mpi/" + cp.mode : bexp + "/" + variant;
     const cached = cacheRef.current[key];
     if (cached) { setResult(Measured[exp](cp, cached)); return; }
     setLoading(true);
-    const body = isMpi
-      ? { kind: "mpi" as const, variant: cp.mode, maxranks: MAXP }
-      : { kind: "bench" as const, exp: bexp, variant, maxthreads: MAXP };
+    const body = isCuda
+      ? { kind: "cuda" as const, variant: cp.variant }
+      : isMpi
+        ? { kind: "mpi" as const, variant: cp.mode, maxranks: MAXP }
+        : { kind: "bench" as const, exp: bexp, variant, maxthreads: MAXP };
     runJob(body)
       .then((data) => {
         if (my !== tokenRef.current) return; // superseded
@@ -131,7 +140,10 @@ export default function Flagship() {
   // Redraw D3 charts when the result changes
   useEffect(() => {
     if (!result) return;
-    if (scalingRef.current) drawScaling(scalingRef.current, result);
+    if (scalingRef.current) {
+      if (result.experimentId === "cuda") drawOccupancy(scalingRef.current, result);
+      else drawScaling(scalingRef.current, result);
+    }
     if (result.experimentId === "bandwidth" && rooflineRef.current) drawRoofline(rooflineRef.current, result);
   }, [result]);
 
@@ -140,7 +152,10 @@ export default function Flagship() {
     const onResize = () => {
       const r = resultRef.current;
       if (!r) return;
-      if (scalingRef.current) drawScaling(scalingRef.current, r);
+      if (scalingRef.current) {
+        if (r.experimentId === "cuda") drawOccupancy(scalingRef.current, r);
+        else drawScaling(scalingRef.current, r);
+      }
       if (r.experimentId === "bandwidth" && rooflineRef.current) drawRoofline(rooflineRef.current, r);
     };
     window.addEventListener("resize", onResize);
@@ -242,11 +257,13 @@ export default function Flagship() {
       <div className="grid">
         <section className="card">
           <h2>Controls</h2>
-          <div className="ctrl">
-            <label>{xLabel}<b>{p[xKey]}</b></label>
-            <input type="range" min={1} max={MAXP} step={1} value={p[xKey]}
-              onChange={(e) => setParam({ [xKey]: +e.target.value })} />
-          </div>
+          {exp !== "cuda" && (
+            <div className="ctrl">
+              <label>{xLabel}<b>{p[xKey]}</b></label>
+              <input type="range" min={1} max={MAXP} step={1} value={p[xKey]}
+                onChange={(e) => setParam({ [xKey]: +e.target.value })} />
+            </div>
+          )}
 
           {exp === "falseSharing" && (
             <>
@@ -323,6 +340,25 @@ export default function Flagship() {
               <div className="fixhint">The fix: weak scaling — grow the grid with the ranks so each rank keeps the same work; efficiency stays flat instead of hitting the communication wall.</div>
             </div>
           )}
+
+          {exp === "cuda" && (
+            <>
+              <div className="ctrl">
+                <label>Threads / block<b>{p.blockSize}</b></label>
+                <input type="range" min={32} max={1024} step={32} value={p.blockSize}
+                  onChange={(e) => setParam({ blockSize: +e.target.value })} />
+              </div>
+              <div className="ctrl">
+                <label>Register pressure</label>
+                <div className="seg fix">
+                  {[["heavy", "heavy"], ["light", "light ✓"]].map(([k, lab]) => (
+                    <button key={k} className={p.variant === k ? "on" : ""} onClick={() => setParam({ variant: k })}>{lab}</button>
+                  ))}
+                </div>
+                <div className="fixhint">The fix: cut registers/thread (a lighter kernel or <code>__launch_bounds__</code>) so more warps fit per SM — occupancy climbs.</div>
+              </div>
+            </>
+          )}
         </section>
 
         <section className="card vizwrap">
@@ -343,10 +379,14 @@ export default function Flagship() {
           <h2>Live metrics</h2>
           <div className="hero">
             <div className="big" style={{ color: heroColor }}>
-              {loading ? "•••" : cur ? fmt(cur.speedup, 1) + "×" : "—"}
+              {loading ? "•••" : cur ? (isCuda ? fmt((result?.occupancy ?? cur.efficiency) * 100, 0) + "%" : fmt(cur.speedup, 1) + "×") : "—"}
             </div>
             <div className="cap">
-              {loading ? `measuring on 24 ${xUnits === "ranks" ? "ranks" : "cores"}…` : cur ? `speedup on ${cur.x} of 24 ${xUnits === "ranks" ? "ranks" : "cores"}` : "speedup"}
+              {loading
+                ? (isCuda ? "measuring on the RTX 5060…" : `measuring on 24 ${xUnits === "ranks" ? "ranks" : "cores"}…`)
+                : cur
+                  ? (isCuda ? `occupancy at ${cur.x} threads/block` : `speedup on ${cur.x} of 24 ${xUnits === "ranks" ? "ranks" : "cores"}`)
+                  : (isCuda ? "occupancy" : "speedup")}
             </div>
           </div>
           <div>
@@ -366,14 +406,24 @@ export default function Flagship() {
 
       <div className="lower">
         <section className="card">
-          <h2>Scaling · 1 → {MAXP} {xUnits}</h2>
+          <h2>{isCuda ? "Occupancy · 32 → 1024 threads/block" : `Scaling · 1 → ${MAXP} ${xUnits}`}</h2>
           <div className={"charts" + (exp === "bandwidth" ? " two" : "")}>
             <div className="chart">
               <svg ref={scalingRef} />
               <div className="legend">
-                <span><i style={{ borderColor: "#33405a" }} />ideal (linear)</span>
-                <span><i style={{ borderColor: "var(--accent)" }} />actual speedup</span>
-                <span><i style={{ borderColor: "var(--accent2)" }} />efficiency</span>
+                {isCuda ? (
+                  <>
+                    <span><i style={{ borderColor: "var(--accent)" }} />occupancy</span>
+                    <span><i style={{ borderColor: "var(--accent2)" }} />performance</span>
+                    <span><i style={{ borderColor: "var(--good)" }} />best block</span>
+                  </>
+                ) : (
+                  <>
+                    <span><i style={{ borderColor: "#33405a" }} />ideal (linear)</span>
+                    <span><i style={{ borderColor: "var(--accent)" }} />actual speedup</span>
+                    <span><i style={{ borderColor: "var(--accent2)" }} />efficiency</span>
+                  </>
+                )}
               </div>
             </div>
             {exp === "bandwidth" && (

@@ -107,6 +107,41 @@ async def run_mpi_task(ctx, variant, maxranks):
     return data
 
 
+async def run_cuda_task(ctx, variant):
+    """GPU occupancy block-size sweep: `docker run --gpus all vhpce-cuda <variant>`.
+    The kernel sweeps block sizes internally and reports real occupancy (CUDA Occupancy API)."""
+    if variant not in settings.ALLOWED_CUDA:
+        return {"error": "badrequest", "message": f"unknown cuda variant: {variant}"}
+    cmd = [
+        "docker", "run", "--rm",
+        "--gpus", "all",                       # pass the RTX 5060 into the container
+        "--network", "none",
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--memory", "4g", "--memory-swap", "4g",
+        "--pids-limit", "256",
+        "--read-only", "--tmpfs", "/tmp:rw,exec,size=256m",
+        settings.CUDA_IMAGE,
+        variant,
+    ]
+    try:
+        rc, out, err = await _run(cmd, timeout=settings.CUDA_RUN_TIMEOUT)
+    except RuntimeError as e:
+        return {"error": "run", "message": str(e)}
+    if rc != 0:
+        return {"error": "run", "message": (err.strip()[-1500:] or f"rc={rc}")}
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return {"error": "run", "message": "bad output from cuda container"}
+    if "error" not in data:
+        data["source"] = "measured"
+        data["cores"] = os.cpu_count()
+        data["machine"] = "docker-local-gpu"
+        await ctx["redis"].set(f"cuda:{variant}", json.dumps(data), ex=settings.BENCH_CACHE_TTL)
+    return data
+
+
 async def run_code_task(ctx, source, threads, reps, profile):
     """Arbitrary user OpenMP C in the locked-down runner image (source via stdin).
     Ported from the stdlib runner's run_user_code — same flags, same JSON shape."""
@@ -144,7 +179,7 @@ async def run_code_task(ctx, source, threads, reps, profile):
 
 
 class WorkerSettings:
-    functions = [run_bench_task, run_code_task, run_mpi_task]
+    functions = [run_bench_task, run_code_task, run_mpi_task, run_cuda_task]
     redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
     max_jobs = 1                 # one benchmark container at a time → clean timing
     keep_result = 3600           # keep job results for an hour for polling
