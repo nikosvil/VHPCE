@@ -19,6 +19,7 @@ type Concept = {
   control: Control;
   steps: string[];
   key: string;
+  link: { href: string; label: string };
 };
 
 const CONCEPTS: Concept[] = [
@@ -43,6 +44,7 @@ printf("done\\n");`,
       "At the closing } the threads join — back to one master.",
     ],
     key: "Parallelism lives inside the parallel region; outside it, a single thread runs.",
+    link: { href: "/playground?ex=hello", label: "▶ Run a parallel program in the Playground" },
   },
   {
     id: "parallelFor", group: "OpenMP", name: "Parallel For",
@@ -56,6 +58,7 @@ for (int i = 0; i < 12; i++)
     control: { kind: "slider", label: "Threads", min: 1, max: 6 },
     steps: ["The 12 iterations are dealt to the threads in chunks — each thread runs its slice at the same time, so wall-time ≈ work ÷ threads."],
     key: "Splitting a loop is the most common way to parallelize. Wall-time ≈ work ÷ threads (until overhead bites — see the Flagship).",
+    link: { href: "/playground?ex=reduction", label: "▶ Run a parallel loop in the Playground" },
   },
   {
     id: "sharedPrivate", group: "OpenMP", name: "Shared vs Private",
@@ -72,6 +75,7 @@ for (int i = 0; i < N; i++)
     control: { kind: "seg", key: "mode", options: ["shared", "private", "reduction"] },
     steps: ["Pick a strategy and watch how the threads touch memory."],
     key: "Shared memory means unguarded shared writes race. reduction is the safe, fast pattern.",
+    link: { href: "/playground?ex=falsesharing", label: "▶ See sharing wreck scaling in the Playground" },
   },
   {
     id: "ranksMemory", group: "MPI", name: "Ranks & Memory",
@@ -85,6 +89,7 @@ double x = rank * 10.0;   // each rank has its OWN x`,
     control: { kind: "slider", label: "Ranks", min: 2, max: 6 },
     steps: ["Each MPI rank is its own process with its own private memory — they share nothing directly."],
     key: "MPI = separate processes, separate memory. They cooperate only by passing messages.",
+    link: { href: "/?exp=mpiHalo", label: "→ See MPI scaling measured in the Flagship" },
   },
   {
     id: "sendRecv", group: "MPI", name: "Send / Recv",
@@ -102,6 +107,7 @@ else if (rank == 1)
       "Delivered: rank 1 now has its own copy of the value.",
     ],
     key: "Point-to-point messaging is the building block of MPI: one rank sends, another receives.",
+    link: { href: "/?exp=mpiHalo", label: "→ See MPI scaling measured in the Flagship" },
   },
   {
     id: "collectives", group: "MPI", name: "Collectives",
@@ -114,6 +120,7 @@ MPI_Reduce (send, &sum, 1, .., MPI_SUM, root, comm); // combine → root`,
     control: { kind: "seg", key: "collective", options: ["broadcast", "scatter", "gather", "reduce"] },
     steps: ["Choose a collective to see how data moves between the root and the ranks."],
     key: "One collective call replaces a hand-written loop of sends/recvs — broadcast, scatter, gather, reduce.",
+    link: { href: "/?exp=mpiHalo", label: "→ See MPI scaling measured in the Flagship" },
   },
 ];
 
@@ -258,6 +265,7 @@ export default function Learn() {
             <div className="t">Key idea</div>
             <div className="body">{concept.key}</div>
           </div>
+          <Link className="learn-link" href={concept.link.href}>{concept.link.label}</Link>
         </section>
       </div>
 

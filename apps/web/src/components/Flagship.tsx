@@ -99,6 +99,13 @@ export default function Flagship() {
     return () => { alive = false; };
   }, []);
 
+  // Deep-link: /?exp=<id> opens a specific experiment (e.g. from a /learn card).
+  useEffect(() => {
+    const e = new URLSearchParams(window.location.search).get("exp");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional URL sync on mount (SSR-safe)
+    if (e && e in DEFAULT_PARAMS) setExp(e as ExpId);
+  }, []);
+
   // Recompute on experiment / mode / params change (model = sync, measured = async fetch)
   useEffect(() => {
     const my = ++tokenRef.current;

@@ -39,7 +39,9 @@ Playground code) go through one async backend; **Model mode is the only offline 
   private (race→reduction), MPI ranks & separate memory, send/recv, and collectives (bcast/scatter/
   gather/reduce). Each has a Canvas2D animation, an annotated code snippet, play/step controls, and a
   plain-language caption, plus a key-terms glossary. Pure teaching (no code executed) — the on-ramp
-  *before* the "why it gets slower" Flagship.
+  *before* the "why it gets slower" Flagship. Each card **links onward** (the learning journey):
+  OpenMP cards → a runnable Playground example (`/playground?ex=…`), MPI cards → the measured
+  Flagship experiment (`/?exp=mpiHalo`).
 - **Flagship** (`/`) — five experiments (false sharing, synchronization, bandwidth saturation,
   load imbalance, **MPI halo exchange**), each with: model + **measured** data behind a
   **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a **2D | 3D**
@@ -63,7 +65,9 @@ Playground code) go through one async backend; **Model mode is the only offline 
   `ANTHROPIC_API_KEY` or a per-tab bring-your-own key; built-in explanations always on.
 - **Code Playground** (`/playground`) — Monaco editor → compile + thread-sweep arbitrary OpenMP C
   in a **locked-down Docker container**; measured scaling + generic reading + **opt-in cachegrind**
-  cache-miss profiling (D1/LLd miss rates).
+  cache-miss profiling (D1/LLd miss rates). A row of **one-click worked examples** (parallel sum,
+  hello-threads, false sharing, STREAM triad) lets beginners run real code without writing it;
+  deep-linkable via `?ex=<id>` (the `/learn` cards point here).
 - **Cloud gateway** (`services/api`) — **FastAPI + Redis + Arq**, run via `docker-compose`. The
   Flagship's Measured mode and the Playground both **submit jobs and poll**: `POST /api/jobs`
   (`{kind:"bench"|"code", ...}`) → `GET /api/jobs/{id}`. The Arq worker (`max_jobs=1`, serialized for

@@ -5,26 +5,11 @@ import Editor from "@monaco-editor/react";
 import { drawScaling } from "@vhpce/viz";
 import { fmt } from "@vhpce/profile-schema";
 import { health, runJob, type Phase } from "../lib/runner";
+import { EXAMPLES } from "./playground-examples";
 
 const SWEEP = [1, 2, 4, 8, 12, 16, 20, 24];
 
-const STARTER = `/* OpenMP playground — your code runs on 24 real cores.
-   Edit freely, then Run. We compile it and time the WHOLE program across
-   thread counts (OMP_NUM_THREADS = 1..24), then chart the scaling.
-   Tip: keep the work big enough that timing is meaningful (~100 ms+). */
-#include <stdio.h>
-#include <omp.h>
-
-int main(void) {
-    const long N = 300000000;          /* fixed total work, split across threads */
-    double sum = 0.0;
-    #pragma omp parallel for reduction(+:sum)
-    for (long i = 0; i < N; i++)
-        sum += 1.0 / (double)(i + 1);
-    printf("sum=%f on %d threads\\n", sum, omp_get_max_threads());
-    return 0;
-}
-`;
+const STARTER = EXAMPLES[0].source;   // "Parallel sum" — the default starting point
 
 type Point = { p: number; ms: number };
 type Cache = { d1MissPct?: number; lldMissPct?: number; llMissPct?: number; irefs?: number; error?: string };
@@ -95,6 +80,14 @@ export default function Playground() {
       .catch(() => { setRunnerOk(false); setDockerOk(false); });
   }, []);
 
+  // Deep-link: /playground?ex=<id> preloads a worked example (e.g. from a /learn card).
+  useEffect(() => {
+    const ex = new URLSearchParams(window.location.search).get("ex");
+    const found = ex ? EXAMPLES.find((e) => e.id === ex) : null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional URL sync on mount (SSR-safe)
+    if (found) setSource(found.source);
+  }, []);
+
   const points = data?.points || null;
   const result = points && points.length ? buildResult(points) : null;
 
@@ -147,6 +140,12 @@ export default function Playground() {
       <div className="pg-grid">
         <section className="card pg-editor">
           <h2>OpenMP C source</h2>
+          <div className="pg-examples">
+            <span className="pg-examples-label">Examples:</span>
+            {EXAMPLES.map((ex) => (
+              <button key={ex.id} className="pg-ex-btn" title={ex.blurb} onClick={() => setSource(ex.source)}>{ex.label}</button>
+            ))}
+          </div>
           <Editor
             height="440px"
             defaultLanguage="c"
