@@ -34,6 +34,12 @@ Playground code) go through one async backend; **Model mode is the only offline 
 
 ## 2. What's built (concise)
 
+- **Learn the Basics** (`/learn`) — a beginner on-ramp (no backend, offline): six animated concept
+  cards for **how OpenMP & MPI actually work** — fork–join, parallel-for loop splitting, shared vs
+  private (race→reduction), MPI ranks & separate memory, send/recv, and collectives (bcast/scatter/
+  gather/reduce). Each has a Canvas2D animation, an annotated code snippet, play/step controls, and a
+  plain-language caption, plus a key-terms glossary. Pure teaching (no code executed) — the on-ramp
+  *before* the "why it gets slower" Flagship.
 - **Flagship** (`/`) — five experiments (false sharing, synchronization, bandwidth saturation,
   load imbalance, **MPI halo exchange**), each with: model + **measured** data behind a
   **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a **2D | 3D**
@@ -94,7 +100,8 @@ pnpm --filter web dev                                                          #
 
 - **Ports:** web `:3000`, gateway api `:8000`, redis `:6379`. Browser reaches the gateway at
   `http://localhost:8000` (override with `NEXT_PUBLIC_VHPCE_API`).
-- **Routes:** `/` (Flagship), `/playground` (Code Playground), `POST|GET /api/ask` (LLM, Next route).
+- **Routes:** `/learn` (Basics — offline concept animations), `/` (Flagship), `/playground` (Code
+  Playground), `POST|GET /api/ask` (LLM, Next route).
   Gateway: `GET /api/health`, `POST /api/jobs`, `GET /api/jobs/{id}`.
 - **Ask-the-AI:** set `ANTHROPIC_API_KEY` in `apps/web/.env.local` (then restart) **or** paste a key
   in the panel (kept per-tab only).
@@ -121,7 +128,8 @@ vhpce/
 │           ├─ Flagship.tsx        flagship shell: state, Model|Measured, recompute, charts, AskAI
 │           ├─ Playground.tsx      Monaco editor + run/profile + result + cache panel
 │           ├─ AskAI.tsx           streaming LLM panel (grounded)
-│           ├─ Nav.tsx             top nav (Flagship | Playground)
+│           ├─ Nav.tsx             top nav (Learn | Flagship | Playground)
+│           ├─ Learn.tsx           /learn beginner concept cards (+ learn/scenes.ts Canvas animations)
 │           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance,Mpi,Cuda}Scene3D
 │
 ├─ packages/                       shared TS (transpiled by Next, no build step)
