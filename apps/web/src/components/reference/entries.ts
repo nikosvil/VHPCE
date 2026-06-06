@@ -328,8 +328,140 @@ export const ENTRIES: RefEntry[] = [
     summary: "No rank proceeds until all ranks in the communicator have reached the barrier.",
     visual: { archetype: "collective", params: { op: "barrier" } }, related: ["omp_barrier"],
   },
+
+  /* ===================== OpenACC ===================== */
+  {
+    id: "acc_parallel", tech: "OpenACC", category: "Compute", name: "#pragma acc parallel",
+    signature: "#pragma acc parallel [clauses]\n{ /* runs on the accelerator */ }",
+    summary: "Launches the region on the accelerator (GPU); you control the parallelism explicitly.",
+    note: "You decide gang/worker/vector. Compare with `kernels`, where the compiler decides.",
+    visual: { archetype: "offload", params: { kind: "parallel" } }, related: ["acc_kernels", "acc_parallel_loop", "acc_loop"],
+  },
+  {
+    id: "acc_kernels", tech: "OpenACC", category: "Compute", name: "#pragma acc kernels",
+    signature: "#pragma acc kernels\n{ for (...) ...; for (...) ...; }",
+    summary: "Hands a region to the compiler, which finds the parallel loops and offloads them.",
+    note: "Easier to start with; `parallel` gives you more control when the compiler is too cautious.",
+    visual: { archetype: "offload", params: { kind: "kernels" } }, related: ["acc_parallel"],
+  },
+  {
+    id: "acc_parallel_loop", tech: "OpenACC", category: "Compute", name: "#pragma acc parallel loop",
+    signature: "#pragma acc parallel loop\nfor (i = 0; i < N; i++) work(i);",
+    summary: "The common combo: launch on the device and distribute the loop across it.",
+    visual: { archetype: "offload", params: { kind: "loop" } }, related: ["acc_parallel", "acc_loop", "omp_parallel_for"],
+  },
+  {
+    id: "acc_loop", tech: "OpenACC", category: "Compute", name: "#pragma acc loop",
+    signature: "#pragma acc loop [gang|worker|vector] [independent]\nfor (...) ...",
+    summary: "Distributes a loop's iterations across the device's parallelism levels.",
+    visual: { archetype: "gangs", params: { level: "gang" } }, related: ["acc_gang", "acc_independent"],
+  },
+  {
+    id: "acc_routine", tech: "OpenACC", category: "Compute", name: "#pragma acc routine",
+    signature: "#pragma acc routine seq\ndouble f(double x) { ... }",
+    summary: "Marks a function so it can be compiled for and called from device code.",
+    visual: { archetype: "offload", params: { kind: "routine" } }, related: ["acc_parallel"],
+  },
+  {
+    id: "acc_data", tech: "OpenACC", category: "Data", name: "#pragma acc data",
+    signature: "#pragma acc data copy(a[0:N])\n{ /* several kernels reuse a on the device */ }",
+    summary: "Opens a data region so arrays stay on the device across multiple kernels.",
+    note: "The #1 OpenACC performance fix: hoist data movement out of the compute loops.",
+    visual: { archetype: "accData", params: { clause: "copy" } }, related: ["acc_copyin", "acc_copyout", "acc_present"],
+  },
+  {
+    id: "acc_copyin", tech: "OpenACC", category: "Data", name: "copyin(a[0:N])",
+    signature: "#pragma acc parallel loop copyin(a[0:N])",
+    summary: "Copies data host → device on entry (read-only input that the device needs).",
+    visual: { archetype: "accData", params: { clause: "copyin" } }, related: ["acc_copyout", "acc_copy"],
+  },
+  {
+    id: "acc_copyout", tech: "OpenACC", category: "Data", name: "copyout(a[0:N])",
+    signature: "#pragma acc parallel loop copyout(a[0:N])",
+    summary: "Copies data device → host on exit (results produced on the device).",
+    visual: { archetype: "accData", params: { clause: "copyout" } }, related: ["acc_copyin", "acc_copy"],
+  },
+  {
+    id: "acc_copy", tech: "OpenACC", category: "Data", name: "copy(a[0:N])",
+    signature: "#pragma acc data copy(a[0:N])",
+    summary: "Copies in on entry and out on exit — for data both read and written on the device.",
+    visual: { archetype: "accData", params: { clause: "copy" } }, related: ["acc_copyin", "acc_copyout"],
+  },
+  {
+    id: "acc_create", tech: "OpenACC", category: "Data", name: "create(tmp[0:N])",
+    signature: "#pragma acc data create(tmp[0:N])",
+    summary: "Allocates device memory with no transfer — for scratch/temporary arrays.",
+    visual: { archetype: "accData", params: { clause: "create" } }, related: ["acc_copy", "acc_present"],
+  },
+  {
+    id: "acc_present", tech: "OpenACC", category: "Data", name: "present(a[0:N])",
+    signature: "#pragma acc parallel loop present(a[0:N])",
+    summary: "Asserts the data is already on the device (from an enclosing data region) — no copy.",
+    visual: { archetype: "accData", params: { clause: "present" } }, related: ["acc_data", "acc_enter_data"],
+  },
+  {
+    id: "acc_enter_data", tech: "OpenACC", category: "Data", name: "#pragma acc enter data / exit data",
+    signature: "#pragma acc enter data copyin(a[0:N])\n/* ... */\n#pragma acc exit data copyout(a[0:N])",
+    summary: "Unstructured data lifetime: put data on the device now, take it off later (not block-scoped).",
+    visual: { archetype: "accData", params: { clause: "copyin" } }, related: ["acc_data", "acc_update"],
+  },
+  {
+    id: "acc_update", tech: "OpenACC", category: "Data", name: "#pragma acc update",
+    signature: "#pragma acc update device(a[0:N])\n#pragma acc update self(a[0:N])   // self = host",
+    summary: "Re-synchronizes the host and device copies of data without leaving the data region.",
+    visual: { archetype: "accData", params: { clause: "update" } }, related: ["acc_data"],
+  },
+  {
+    id: "acc_gang", tech: "OpenACC", category: "Parallelism levels", name: "gang",
+    signature: "#pragma acc loop gang",
+    summary: "Coarsest level — independent blocks of work (≈ CUDA thread blocks / MPI-like).",
+    visual: { archetype: "gangs", params: { level: "gang" } }, related: ["acc_worker", "acc_vector"],
+  },
+  {
+    id: "acc_worker", tech: "OpenACC", category: "Parallelism levels", name: "worker",
+    signature: "#pragma acc loop worker",
+    summary: "Middle level — a group of threads within a gang.",
+    visual: { archetype: "gangs", params: { level: "worker" } }, related: ["acc_gang", "acc_vector"],
+  },
+  {
+    id: "acc_vector", tech: "OpenACC", category: "Parallelism levels", name: "vector",
+    signature: "#pragma acc loop vector",
+    summary: "Finest level — SIMD lanes within a worker (≈ CUDA threads in a warp).",
+    visual: { archetype: "gangs", params: { level: "vector" } }, related: ["acc_gang", "acc_worker"],
+  },
+  {
+    id: "acc_num_gangs", tech: "OpenACC", category: "Parallelism levels", name: "num_gangs / vector_length",
+    signature: "#pragma acc parallel num_gangs(256) vector_length(128)",
+    summary: "Tunes how many gangs and how wide the vector lanes are for the launch.",
+    visual: { archetype: "gangs", params: { level: "gang" } }, related: ["acc_gang", "acc_vector"],
+  },
+  {
+    id: "acc_reduction", tech: "OpenACC", category: "Compute", name: "reduction(op:var)",
+    signature: "#pragma acc parallel loop reduction(+:sum)",
+    summary: "Combines a per-iteration value into one result (sum, max, ...) — same idea as OpenMP.",
+    visual: { archetype: "reduction", params: { threads: 4 } }, related: ["omp_reduction", "mpi_reduce"],
+  },
+  {
+    id: "acc_async", tech: "OpenACC", category: "Compute", name: "async / #pragma acc wait",
+    signature: "#pragma acc parallel loop async(1)\n#pragma acc wait(1)",
+    summary: "Launches device work asynchronously so the host keeps going; `wait` synchronizes.",
+    note: "Overlap host work or other kernels with the device — the OpenACC analog of MPI non-blocking.",
+    visual: { archetype: "offload", params: { kind: "wait" } }, related: ["mpi_isend"],
+  },
+  {
+    id: "acc_collapse", tech: "OpenACC", category: "Compute", name: "collapse(n)",
+    signature: "#pragma acc parallel loop collapse(2)\nfor (i..) for (j..) work(i,j);",
+    summary: "Merges n nested loops into one big iteration space — more parallelism for the device.",
+    visual: { archetype: "gangs", params: { level: "gang" } }, related: ["acc_loop", "omp_collapse"],
+  },
+  {
+    id: "acc_independent", tech: "OpenACC", category: "Compute", name: "independent",
+    signature: "#pragma acc loop independent",
+    summary: "Tells the compiler the iterations are independent, so it can parallelize freely.",
+    visual: { archetype: "gangs", params: { level: "gang" } }, related: ["acc_loop"],
+  },
 ];
 
-export const TECHS: Tech[] = ["OpenMP", "MPI"];
+export const TECHS: Tech[] = ["OpenMP", "MPI", "OpenACC"];
 export const categoriesFor = (tech: Tech) =>
   Array.from(new Set(ENTRIES.filter((e) => e.tech === tech).map((e) => e.category)));

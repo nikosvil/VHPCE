@@ -40,7 +40,10 @@ export default function Reference() {
     return g;
   }, [filtered]);
 
-  const sel = byId(selId) ?? filtered[0] ?? ENTRIES[0];
+  // Prefer the selected entry, but if a filter/search hid it, fall back to the first visible one.
+  const sel = filtered.find((e) => e.id === selId) ?? filtered[0] ?? ENTRIES[0];
+  // Jump to any entry (e.g. a cross-tech "related" link) by clearing filters first.
+  const goTo = (id: string) => { setFilter("All"); setQ(""); setSelId(id); };
   const selRef = useRef(sel);
   useEffect(() => { selRef.current = sel; });
 
@@ -147,7 +150,7 @@ export default function Reference() {
             <div className="ref-related">
               <span className="ref-terms-label">related:</span>
               {sel.related.map((rid) => { const r = byId(rid); return r ? (
-                <button key={rid} className="ref-chip" onClick={() => setSelId(rid)}>{r.name}</button>
+                <button key={rid} className="ref-chip" onClick={() => goTo(rid)}>{r.name}</button>
               ) : null; })}
             </div>
           )}

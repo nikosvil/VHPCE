@@ -42,14 +42,15 @@ Playground code) go through one async backend; **Model mode is the only offline 
   *before* the "why it gets slower" Flagship. Each card **links onward** (the learning journey):
   OpenMP cards → a runnable Playground example (`/playground?ex=…`), MPI cards → the measured
   Flagship experiment (`/?exp=mpiHalo`).
-- **Command Reference** (`/reference`) — a searchable, filterable library of **every OpenMP & MPI
-  directive/command** (~47 entries seeded), each with a "smart" looping animation, syntax, a
-  plain-English summary, a "good to know" note, hover-glossary `<Term>`s, related links, and a
-  "▶ Run in the Playground" link where it maps to a runnable example. **Archetype-driven**: ~11
-  reusable Canvas animations (`reference/archetypes.ts`) + a data table (`reference/entries.ts`)
-  where each entry maps to an archetype + params — so coverage grows by adding *data*, not code.
-  Deep-linkable via `/reference?id=<entryId>`. **OpenACC** is the planned next tranche (add an
-  `offload` archetype + entries; the `Tech` type already allows it).
+- **Command Reference** (`/reference`) — a searchable, filterable library of **OpenMP, MPI & OpenACC
+  directives/commands** (~68 entries seeded), each with a "smart" looping animation, syntax, a
+  plain-English summary, a "good to know" note, hover-glossary `<Term>`s, related links (cross-tech
+  navigation resets the filter), and a "▶ Run in the Playground" link where it maps to a runnable
+  example. **Archetype-driven**: **14** reusable Canvas animations (`reference/archetypes.ts`) — incl.
+  OpenACC `offload` (host↔device), `accData` (copyin/out/create/present/update), and `gangs`
+  (gang/worker/vector) — + a data table (`reference/entries.ts`) where each entry maps to an
+  archetype + params, so coverage grows by adding *data*, not code. Deep-linkable via
+  `/reference?id=<entryId>`. The selected entry follows the active filter/search.
 - **Flagship** (`/`) — five experiments (false sharing, synchronization, bandwidth saturation,
   load imbalance, **MPI halo exchange**), each with: model + **measured** data behind a
   **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a **2D | 3D**
@@ -188,11 +189,10 @@ Phases P0–P4 + the Cloud gateway are all done — four execution models (OpenM
 CUDA) flow through one seam — plus a beginner layer (Learn → Reference → Playground → Flagship).
 Candidate next steps, in rough priority:
 
-1. **OpenACC in the Reference + more entries (newcomer aids continuation).** Add an `offload`
-   archetype (host↔device data + `parallel`/`kernels`/`loop`/`gang/worker/vector`) to
-   `reference/archetypes.ts` and seed OpenACC entries in `reference/entries.ts` (`Tech` already allows
-   it) — pure data once the archetype exists. Also flesh out the long tail of OpenMP/MPI entries and
-   sprinkle `<Term>` glossary tooltips into the Flagship/Playground text.
+1. **Reference long tail + glossary reach (newcomer aids continuation).** OpenACC is now seeded
+   (`offload`/`accData`/`gangs` archetypes + ~21 entries). Next: flesh out the long tail of
+   OpenMP/MPI/OpenACC entries (clauses, less-common calls), sprinkle `<Term>` glossary tooltips into
+   the Flagship/Playground prose, and consider per-entry runnable snippets beyond the four examples.
 
 2. **Deeper GPU lessons reusing the cuda path.** More `{kind:"cuda"}` experiments — memory
    **coalescing** (coalesced vs strided), **warp divergence**, shared-memory bank conflicts — each a

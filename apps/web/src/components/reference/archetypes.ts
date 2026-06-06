@@ -4,7 +4,7 @@
 // Reference.tsx owns the rAF loop. Literal hex (canvas ignores CSS var()). Self-contained
 // helpers so /learn stays untouched.
 
-export type ArchetypeParams = { threads?: number; kind?: string; op?: string; mode?: string; clause?: string };
+export type ArchetypeParams = { threads?: number; kind?: string; op?: string; mode?: string; clause?: string; level?: string };
 export type Archetype = (ctx: CanvasRenderingContext2D, w: number, h: number, now: number, p: ArchetypeParams) => void;
 
 const C = {
@@ -295,7 +295,96 @@ const collective: Archetype = (ctx, w, h, now, p) => {
   caption(ctx, w, h, cap, C.good);
 };
 
+/* ============================ OpenACC ============================ */
+
+const offload: Archetype = (ctx, w, h, now, p) => {
+  const kind = p.kind ?? "parallel";
+  const hostX = w * 0.16, hbW = 116, bh = 150, cy = h * 0.42, top = cy - bh / 2;
+  const devX = w * 0.6, dbW = Math.min(280, w * 0.36);
+  // host
+  rr(ctx, hostX - hbW / 2, top, hbW, bh, 10); ctx.fillStyle = "#0b1119"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = C.accent; ctx.stroke();
+  ctx.fillStyle = C.accent; ctx.font = "600 11px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillText("Host (CPU)", hostX, top + 16);
+  box(ctx, hostX - 24, cy - 11, 48, 22, C.accent, "main");
+  // device
+  rr(ctx, devX, top, dbW, bh, 10); ctx.fillStyle = "#0b1119"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = C.good; ctx.stroke();
+  ctx.fillStyle = C.good; ctx.font = "600 11px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.fillText("Device (GPU)", devX + dbW / 2, top + 16);
+  const cols = 8, rows = 4, gx = devX + 14, gy = top + 28, cw = (dbW - 28) / cols, ch = (bh - 42) / rows;
+  const compute = kind !== "routine" && kind !== "wait";
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = r * cols + c; rr(ctx, gx + c * cw + 2, gy + r * ch + 2, cw - 4, ch - 4, 3);
+    ctx.fillStyle = C.good; ctx.globalAlpha = compute ? 0.28 + 0.25 * Math.sin(now / 300 + i * 0.4) : 0.08; ctx.fill(); ctx.globalAlpha = 1;
+  }
+  arrow(ctx, hostX + hbW / 2, cy, devX, cy, C.warn, 2);
+  const label = kind === "kernels" ? "kernels" : kind === "loop" ? "parallel loop" : kind === "routine" ? "routine" : kind === "wait" ? "wait" : "parallel";
+  ctx.fillStyle = C.warn; ctx.font = "10px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.fillText("#pragma acc " + label, (hostX + hbW / 2 + devX) / 2, cy - 10);
+  const caps: Record<string, string> = {
+    parallel: "acc parallel: you launch parallel work on the device (you control the levels)",
+    kernels: "acc kernels: the compiler analyses the region and parallelizes loops for you",
+    loop: "acc parallel loop: launch + distribute the loop's iterations across the device",
+    routine: "acc routine: marks a function as callable from device code",
+    wait: "acc wait: the host blocks until the async device work completes",
+  };
+  caption(ctx, w, h, caps[kind] ?? caps.parallel, C.good);
+};
+
+const accData: Archetype = (ctx, w, h, now, p) => {
+  const clause = p.clause ?? "copy", hostX = w * 0.24, devX = w * 0.76, cy = h * 0.42, bw = 130, bh = 80;
+  const node = (cx: number, label: string, col: string, cell: string) => {
+    rr(ctx, cx - bw / 2, cy - bh / 2, bw, bh, 9); ctx.fillStyle = "#0b1119"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke();
+    ctx.fillStyle = col; ctx.font = "600 11px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillText(label, cx, cy - bh / 2 + 16);
+    box(ctx, cx - 30, cy - 6, 60, 30, col, cell);
+  };
+  node(hostX, "Host", C.accent, "a[…]");
+  node(devX, "Device", C.good, clause === "create" ? "a[?]" : "a[…]");
+  const ph = (now / 1500) % 1;
+  const inDir = clause === "copyin" || clause === "copy" || clause === "update";
+  const outDir = clause === "copyout" || clause === "copy";
+  if (clause === "present") { ctx.fillStyle = C.good; ctx.font = "10px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.fillText("already on device — no transfer", w / 2, cy - bh / 2 - 18); }
+  else if (clause === "create") { ctx.fillStyle = C.dim; ctx.font = "10px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.fillText("allocated on device — no transfer", w / 2, cy - bh / 2 - 18); }
+  if (inDir) { const y = cy - bh / 2 - 6; arrow(ctx, hostX + bw / 2, y, devX - bw / 2, y, C.warn, 1.5); const x = hostX + bw / 2 + ph * (devX - bw / 2 - (hostX + bw / 2)); box(ctx, x - 12, y - 22, 24, 18, C.warn, "a", 8); }
+  if (outDir) { const y = cy + bh / 2 + 6; arrow(ctx, devX - bw / 2, y, hostX + bw / 2, y, C.accent2, 1.5); const x = (devX - bw / 2) + ph * ((hostX + bw / 2) - (devX - bw / 2)); box(ctx, x - 12, y + 4, 24, 18, C.accent2, "a", 8); }
+  const caps: Record<string, string> = {
+    copyin: "copyin: host → device on entry (input data)",
+    copyout: "copyout: device → host on exit (results)",
+    copy: "copy: copied in on entry, out on exit",
+    create: "create: allocate on the device, no transfer",
+    present: "present: data is already on the device — reuse it (no copy)",
+    update: "update: explicitly re-sync the host/device copies mid-region",
+  };
+  caption(ctx, w, h, caps[clause] ?? caps.copy, C.warn);
+};
+
+const gangs: Archetype = (ctx, w, h, now, p) => {
+  const level = p.level ?? "gang", NG = 3, pad = 24, top = 40, gw = (w - pad * 2 - (NG - 1) * 14) / NG, gh = h - 108;
+  for (let g = 0; g < NG; g++) {
+    const gx = pad + g * (gw + 14);
+    rr(ctx, gx, top, gw, gh, 8); ctx.fillStyle = "#0b1119"; ctx.fill();
+    ctx.lineWidth = level === "gang" ? 2 : 1; ctx.strokeStyle = level === "gang" ? C.good : C.line; ctx.stroke();
+    ctx.fillStyle = level === "gang" ? C.good : C.dim; ctx.font = "10px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillText("gang " + g, gx + gw / 2, top + 14);
+    const NW = 2;
+    for (let wk = 0; wk < NW; wk++) {
+      const wh2 = (gh - 30) / NW - 8, wy = top + 22 + wk * ((gh - 30) / NW), wx = gx + 8, ww = gw - 16;
+      rr(ctx, wx, wy, ww, wh2, 6); ctx.fillStyle = "#0a0f18"; ctx.fill();
+      ctx.lineWidth = level === "worker" ? 2 : 1; ctx.strokeStyle = level === "worker" ? C.warn : "#1c2940"; ctx.stroke();
+      ctx.fillStyle = level === "worker" ? C.warn : C.dim; ctx.font = "9px ui-monospace, monospace"; ctx.fillText("worker", wx + ww / 2, wy + 12);
+      const NL = 6;
+      for (let l = 0; l < NL; l++) {
+        const lw = (ww - 16) / NL, lx = wx + 8 + l * lw, ly = wy + wh2 - 14;
+        rr(ctx, lx + 1, ly, lw - 3, 8, 2);
+        ctx.fillStyle = level === "vector" ? C.accent : C.dim;
+        ctx.globalAlpha = level === "vector" ? 0.4 + 0.4 * Math.sin(now / 250 + l + g + wk) : 0.18; ctx.fill(); ctx.globalAlpha = 1;
+      }
+    }
+  }
+  const caps: Record<string, string> = {
+    gang: "gang: coarse parallel blocks (like CUDA thread blocks) — independent",
+    worker: "worker: a group of threads within a gang",
+    vector: "vector: SIMD lanes within a worker — the innermost, finest level",
+  };
+  caption(ctx, w, h, caps[level] ?? caps.gang, level === "gang" ? C.good : level === "worker" ? C.warn : C.accent);
+};
+
 export const archetypes: Record<string, Archetype> = {
   forkJoin, worksharing, schedule, barrier, criticalAtomic, reduction, dataSharing, tasks,
-  ranksMemory, pointToPoint, collective,
+  ranksMemory, pointToPoint, collective, offload, accData, gangs,
 };
