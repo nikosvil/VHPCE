@@ -42,6 +42,14 @@ Playground code) go through one async backend; **Model mode is the only offline 
   *before* the "why it gets slower" Flagship. Each card **links onward** (the learning journey):
   OpenMP cards → a runnable Playground example (`/playground?ex=…`), MPI cards → the measured
   Flagship experiment (`/?exp=mpiHalo`).
+- **Command Reference** (`/reference`) — a searchable, filterable library of **every OpenMP & MPI
+  directive/command** (~47 entries seeded), each with a "smart" looping animation, syntax, a
+  plain-English summary, a "good to know" note, hover-glossary `<Term>`s, related links, and a
+  "▶ Run in the Playground" link where it maps to a runnable example. **Archetype-driven**: ~11
+  reusable Canvas animations (`reference/archetypes.ts`) + a data table (`reference/entries.ts`)
+  where each entry maps to an archetype + params — so coverage grows by adding *data*, not code.
+  Deep-linkable via `/reference?id=<entryId>`. **OpenACC** is the planned next tranche (add an
+  `offload` archetype + entries; the `Tech` type already allows it).
 - **Flagship** (`/`) — five experiments (false sharing, synchronization, bandwidth saturation,
   load imbalance, **MPI halo exchange**), each with: model + **measured** data behind a
   **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a **2D | 3D**
@@ -104,8 +112,8 @@ pnpm --filter web dev                                                          #
 
 - **Ports:** web `:3000`, gateway api `:8000`, redis `:6379`. Browser reaches the gateway at
   `http://localhost:8000` (override with `NEXT_PUBLIC_VHPCE_API`).
-- **Routes:** `/learn` (Basics — offline concept animations), `/` (Flagship), `/playground` (Code
-  Playground), `POST|GET /api/ask` (LLM, Next route).
+- **Routes:** `/learn` (Basics — concept animations), `/reference` (command library — offline), `/`
+  (Flagship), `/playground` (Code Playground), `POST|GET /api/ask` (LLM, Next route).
   Gateway: `GET /api/health`, `POST /api/jobs`, `GET /api/jobs/{id}`.
 - **Ask-the-AI:** set `ANTHROPIC_API_KEY` in `apps/web/.env.local` (then restart) **or** paste a key
   in the panel (kept per-tab only).
@@ -130,10 +138,12 @@ vhpce/
 │        ├─ lib/runner.ts          gateway client: health() + runJob() submit/poll (Flagship + Playground)
 │        └─ components/
 │           ├─ Flagship.tsx        flagship shell: state, Model|Measured, recompute, charts, AskAI
-│           ├─ Playground.tsx      Monaco editor + run/profile + result + cache panel
+│           ├─ Playground.tsx      Monaco editor + run/profile + result + cache panel (+ worked examples)
 │           ├─ AskAI.tsx           streaming LLM panel (grounded)
-│           ├─ Nav.tsx             top nav (Learn | Flagship | Playground)
+│           ├─ Nav.tsx             top nav (Learn | Reference | Flagship | Playground)
 │           ├─ Learn.tsx           /learn beginner concept cards (+ learn/scenes.ts Canvas animations)
+│           ├─ Reference.tsx       /reference command library (+ reference/archetypes.ts + entries.ts)
+│           ├─ Term.tsx · glossary.ts   hover-glossary tooltips (used in /reference + /learn)
 │           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance,Mpi,Cuda}Scene3D
 │
 ├─ packages/                       shared TS (transpiled by Next, no build step)
@@ -175,13 +185,18 @@ vhpce/
 ## 6. Next implementation steps
 
 Phases P0–P4 + the Cloud gateway are all done — four execution models (OpenMP, arbitrary code, MPI,
-CUDA) flow through one seam. The remaining roadmap is **P5** (domains, gamification, classrooms,
-cloud scale). Candidate next steps, in rough priority:
+CUDA) flow through one seam — plus a beginner layer (Learn → Reference → Playground → Flagship).
+Candidate next steps, in rough priority:
 
-1. **Deeper GPU lessons reusing the cuda path.** Add more `{kind:"cuda"}` variants/experiments —
-   memory **coalescing** (coalesced vs strided), **warp divergence**, shared-memory bank conflicts —
-   each a new kernel in `occupancy.cu`/a sibling + an `EXPERIMENTS` entry. The image/gateway/scene
-   plumbing already exists.
+1. **OpenACC in the Reference + more entries (newcomer aids continuation).** Add an `offload`
+   archetype (host↔device data + `parallel`/`kernels`/`loop`/`gang/worker/vector`) to
+   `reference/archetypes.ts` and seed OpenACC entries in `reference/entries.ts` (`Tech` already allows
+   it) — pure data once the archetype exists. Also flesh out the long tail of OpenMP/MPI entries and
+   sprinkle `<Term>` glossary tooltips into the Flagship/Playground text.
+
+2. **Deeper GPU lessons reusing the cuda path.** More `{kind:"cuda"}` experiments — memory
+   **coalescing** (coalesced vs strided), **warp divergence**, shared-memory bank conflicts — each a
+   new kernel in `occupancy.cu`/a sibling + an `EXPERIMENTS` entry (plumbing already exists).
 
 2. **Engineering-domain modules (P5).** FEM/FDTD/CFD/stencil/FFT mini-labs with interactive domain
    decomposition and convergence plots, built on the same `ProfileResult` seam and the gateway job
