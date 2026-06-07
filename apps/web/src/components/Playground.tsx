@@ -8,6 +8,7 @@ import { health, runJob, type Phase } from "../lib/runner";
 import { EXAMPLES } from "./playground-examples";
 import Term from "./Term";
 import { GLOSSARY } from "./glossary";
+import Glossed from "./Glossed";
 
 const SWEEP = [1, 2, 4, 8, 12, 16, 20, 24];
 
@@ -207,7 +208,7 @@ export default function Playground() {
               <div className="chart" style={{ marginTop: 12 }}><svg ref={svgRef} /></div>
               <div className="eb why" style={{ marginTop: 12 }}>
                 <div className="t">Reading</div>
-                <div className="body">{reading(result)}</div>
+                <div className="body"><Glossed>{reading(result)}</Glossed></div>
               </div>
               {data?.cache && !data.cache.error && (
                 <div className="eb how" style={{ marginTop: 12 }}>
@@ -216,7 +217,7 @@ export default function Playground() {
                     <div className="metric"><span className="k">L1 data miss rate</span><span className={"v " + missTone(data.cache.d1MissPct)}>{fmt(data.cache.d1MissPct ?? 0, 1)}%</span></div>
                     <div className="metric"><span className="k">Last-level data miss</span><span className={"v " + missTone(data.cache.lldMissPct)}>{fmt(data.cache.lldMissPct ?? 0, 1)}%</span></div>
                     <div className="metric"><span className="k">Instructions executed</span><span className="v">{(data.cache.irefs ?? 0).toLocaleString()}</span></div>
-                    <div style={{ marginTop: 8 }}>{cacheInsight(data.cache)}</div>
+                    <div style={{ marginTop: 8 }}><Glossed>{cacheInsight(data.cache)}</Glossed></div>
                   </div>
                 </div>
               )}

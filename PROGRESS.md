@@ -43,9 +43,10 @@ Playground code) go through one async backend; **Model mode is the only offline 
   OpenMP cards → a runnable Playground example (`/playground?ex=…`), MPI cards → the measured
   Flagship experiment (`/?exp=mpiHalo`).
 - **Command Reference** (`/reference`) — a searchable, filterable library of **OpenMP, MPI & OpenACC
-  directives/commands** (~140 entries: OpenMP 64 / MPI 49 / OpenACC 27, incl. OpenMP `target`
-  offloading, MPI one-sided RMA + parallel I/O + neighborhood collectives + persistent requests,
-  atomic variants, …), each with a "smart" looping animation, syntax, a
+  directives/commands** (~158 entries: OpenMP 72 / MPI 59 / OpenACC 27 — incl. OpenMP `target`
+  offloading + advanced (metadirective/declare variant) + runtime env; MPI one-sided RMA (+ shared
+  windows), parallel I/O, neighborhood collectives, persistent requests, graph topologies, dynamic
+  processes), each with a "smart" looping animation, syntax, a
   plain-English summary, a "good to know" note, hover-glossary `<Term>`s, related links (cross-tech
   navigation resets the filter), and a "▶ Run in the Playground" link where it maps to a runnable
   example. **Archetype-driven**: **14** reusable Canvas animations (`reference/archetypes.ts`) — incl.
@@ -147,6 +148,7 @@ vhpce/
 │           ├─ Learn.tsx           /learn beginner concept cards (+ learn/scenes.ts Canvas animations)
 │           ├─ Reference.tsx       /reference command library (+ reference/archetypes.ts + entries.ts)
 │           ├─ Term.tsx · glossary.ts   hover-glossary tooltips (/reference + Flagship/Playground metric labels & hints)
+│           ├─ Glossed.tsx          auto-glosser: wraps glossary terms in any prose string with <Term> (Reference/Learn/Playground)
 │           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance,Mpi,Cuda}Scene3D
 │
 ├─ packages/                       shared TS (transpiled by Next, no build step)
