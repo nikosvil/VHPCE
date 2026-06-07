@@ -24,6 +24,8 @@ export const GLOSSARY: Record<string, string> = {
   critical: "A block only one thread may execute at a time (mutual exclusion) — correct but serializing.",
   simd: "Single Instruction, Multiple Data — one instruction operating on a vector of values at once.",
   amdahl: "Amdahl's law: a serial fraction f caps speedup at 1/f no matter how many threads you add.",
+  coalescing: "When a warp's 32 lanes read consecutive addresses, the GPU serves them all with one 128-byte memory transaction — the bandwidth-optimal access pattern.",
+  "warp divergence": "When lanes in a warp take different branch paths, the GPU runs each path in turn (the others idle), so divergent code serializes the warp.",
 };
 
 export const GLOSSARY_KEYS = Object.keys(GLOSSARY);

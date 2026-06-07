@@ -117,6 +117,24 @@ export const Explain: Record<string, ExplainFn> = {
       exp: `Reducing registers (flip to <b>light</b>) lifts occupancy toward 100% — more warps per SM, better latency hiding.`,
     };
   },
+  cudaCoalesce(r) {
+    const stride = r.current.x, eff = (r.current.efficiency ?? 0) * 100, wasted = 100 - eff;
+    if (stride === 1)
+      return {
+        sev: "info",
+        what: `Coalesced access (<b>stride 1</b>): the warp's 32 lanes read 32 consecutive values, so the GPU fetches <b>one 128-byte cache line</b> per warp — <b>${fmt(r.bw ?? 0, 0)} GB/s</b>, 0% wasted.`,
+        why: `Adjacent lanes touch adjacent addresses, so the memory controller services the whole warp with a single transaction. This is the bandwidth-optimal pattern.`,
+        how: `Already optimal. Push the <b>stride</b> up to watch each warp scatter across more cache lines.`,
+        exp: `Every doubling of the stride roughly halves the achieved bandwidth — the curve is ~1/stride.`,
+      };
+    return {
+      sev: eff < 30 ? "critical" : "warn",
+      what: `<b>Stride ${stride}</b>: the 32 lanes land in ${stride} different cache lines, so the GPU moves <b>${stride}×</b> the bytes for the same data — <b>${fmt(r.bw ?? 0, 0)} GB/s</b>, ~${fmt(wasted, 0)}% of fetched bandwidth discarded.`,
+      why: `A 128-byte line is the smallest unit DRAM delivers. When lanes are spread <code>stride</code> apart, most of each fetched line is unused but still paid for — bandwidth wasted scales with the stride.`,
+      how: `<b>Make the inner index unit-stride.</b> Transpose the loop nest or store the array so the fast-varying dimension matches <code>threadIdx.x</code> (Struct-of-Arrays, not Array-of-Structs).`,
+      exp: `Drop the stride back toward 1 and the achieved bandwidth climbs back to the coalesced peak.`,
+    };
+  },
 };
 
 export const ExplainMeasured: Record<string, ExplainFn> = {
@@ -221,6 +239,25 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `At ${r.regsPerThread} registers/thread the SM's register file fills before its warp slots do, so fewer warps run concurrently and latency isn't fully hidden.`,
       how: `Reduce registers (<code>__launch_bounds__</code>, fewer live values) or choose the measured sweet-spot block (~${r.optimalBlock}). Flip to <b>light</b> to see occupancy recover.`,
       exp: `The light kernel measures markedly higher occupancy on the very same GPU.`,
+    };
+  },
+  cudaCoalesce(r) {
+    const stride = r.current.x, eff = (r.current.efficiency ?? 0) * 100, wasted = 100 - eff;
+    const dev = r.smName || "the GPU";
+    if (stride === 1)
+      return {
+        sev: "info",
+        what: `Measured on ${dev}: <b>stride 1</b> (coalesced) sustains <b>${fmt(r.bw ?? 0, 0)} GB/s</b> — the warp's 32 reads collapse into one cache line.`,
+        why: `Consecutive lanes hit consecutive addresses, so each warp costs a single 128-byte transaction. This is the achievable bandwidth ceiling for this kernel on this card.`,
+        how: `This is the target. Increase the <b>stride</b> to measure the bandwidth you lose to scattered access on the same GPU.`,
+        exp: `Bandwidth falls off as roughly 1/stride — the strided runs prove it on real silicon.`,
+      };
+    return {
+      sev: eff < 30 ? "critical" : "warn",
+      what: `Measured on ${dev}: <b>stride ${stride}</b> drops to <b>${fmt(r.bw ?? 0, 0)} GB/s</b> — only ${fmt(eff, 0)}% of the coalesced peak, ~${fmt(wasted, 0)}% of every fetched line thrown away.`,
+      why: `Each warp now spans ${stride} cache lines; the controller still transfers full 128-byte lines but the kernel uses a fraction of each. The wasted bytes are real DRAM traffic you paid for.`,
+      how: `Reorganise so the innermost (unit-stride) index maps to <code>threadIdx.x</code> — Structure-of-Arrays layout, or transpose before the kernel.`,
+      exp: `Set the stride back to 1 and watch the measured bandwidth recover to the coalesced peak on this exact card.`,
     };
   },
 };

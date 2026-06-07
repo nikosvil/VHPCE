@@ -48,6 +48,8 @@ export interface ExperimentResult {
   metrics: Metric[];
   /** x-axis unit for the sweep — "threads" (OpenMP), "ranks" (MPI), or "block" (GPU). Defaults to threads. */
   xUnits?: "threads" | "ranks" | "block";
+  /** free-form x-axis label for the generic GPU sweep chart (e.g. "stride", "divergent paths"). */
+  xLabel?: string;
 
   // experiment-specific extras (optional; populated per experiment)
   peak?: SweepPoint;

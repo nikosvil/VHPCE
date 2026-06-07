@@ -10,7 +10,7 @@ export type JobBody =
   | { kind: "bench"; exp: string; variant: string; maxthreads: number }
   | { kind: "code"; source: string; threads?: number[]; reps?: number; profile?: boolean }
   | { kind: "mpi"; variant: string; maxranks: number }
-  | { kind: "cuda"; variant: string };
+  | { kind: "cuda"; experiment?: string; variant?: string };
 
 export type Phase = "queued" | "running";
 

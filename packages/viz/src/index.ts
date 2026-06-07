@@ -92,6 +92,26 @@ export function drawOccupancy(svgEl: SVGSVGElement, res: ExperimentResult): void
   svg.append("text").attr("x", (m.l + W - m.r) / 2).attr("y", H - 2).attr("fill", C.dim).attr("font-size", 10).attr("text-anchor", "middle").text("threads / block");
 }
 
+// Generic GPU sweep chart: efficiency (0..1) vs a log2 x-axis (stride, paths, …). Used by the
+// coalescing and divergence experiments. x-label comes from res.xLabel.
+export function drawSweep(svgEl: SVGSVGElement, res: ExperimentResult): void {
+  const svg = d3.select(svgEl);
+  svg.selectAll("*").remove();
+  const W = svgEl.clientWidth || 560, H = svgEl.clientHeight || 260, m = { t: 14, r: 16, b: 40, l: 48 };
+  const sw = res.sweep, xs = sw.map((s) => s.x);
+  const x = d3.scaleLog().base(2).domain([Math.min(...xs), Math.max(...xs)]).range([m.l, W - m.r]);
+  const y = d3.scaleLinear().domain([0, 1]).range([H - m.b, m.t]);
+  svg.append("g").selectAll("line").data(y.ticks(5)).join("line").attr("class", "grid-line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
+  const line = d3.line<SweepPoint>().x((d) => x(d.x)).y((d) => y(d.efficiency)).curve(d3.curveMonotoneX);
+  svg.append("path").datum(sw).attr("fill", "none").attr("stroke", C.accent).attr("stroke-width", 2.5).attr("d", line as any);
+  svg.append("g").selectAll("circle").data(sw).join("circle").attr("cx", (d) => x(d.x)).attr("cy", (d) => y(d.efficiency)).attr("r", 3).attr("fill", C.accent2);
+  const cur = res.current;
+  svg.append("circle").attr("cx", x(cur.x)).attr("cy", y(cur.efficiency)).attr("r", 6).attr("fill", C.accent).attr("stroke", "#04121a").attr("stroke-width", 2);
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(xs).tickFormat(d3.format("d")) as any);
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickFormat(d3.format(".0%")) as any);
+  svg.append("text").attr("x", (m.l + W - m.r) / 2).attr("y", H - 2).attr("fill", C.dim).attr("font-size", 10).attr("text-anchor", "middle").text(res.xLabel || "x");
+}
+
 /* =============================== Canvas scenes =============================== */
 function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   r = Math.min(r, h / 2, w / 2);
@@ -324,4 +344,48 @@ const cuda: SceneFn = (ctx, VW, VH, now, res) => {
   );
 };
 
-export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo, cuda };
+// Memory coalescing: a warp's 32 lanes pull from DRAM in 128-byte (32-element) cache lines.
+// stride 1 → all 32 values sit in ONE line (1 transaction, 0% waste). stride S → the warp spans
+// S lines, each only 1/S used — the dim slots are fetched-then-discarded bandwidth.
+const coalesce: SceneFn = (ctx, VW, VH, now, res) => {
+  const stride = Math.max(1, Math.round(res.current.x));
+  const eff = res.current.efficiency ?? 1 / stride;
+  const col = eff > 0.6 ? C.good : eff > 0.3 ? C.warn : C.bad;
+  const WARP = 32, LINE = 32;
+  const lines = Math.min(stride, 8), capped = stride > 8;
+  const pad = 24;
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`one warp · 32 lanes · stride ${stride} → ${stride} cache-line transaction${stride > 1 ? "s" : ""} for the same 32 values`, VW / 2, 18);
+
+  // warp lane strip
+  const wy = 32, wh = 18, ww = VW - pad * 2, cw = ww / WARP;
+  for (let t = 0; t < WARP; t++) {
+    const x = pad + t * cw; rr(ctx, x + 1, wy, cw - 2, wh, 3);
+    ctx.fillStyle = col; ctx.globalAlpha = 0.22 + 0.2 * Math.sin(now / 400 + t * 0.3); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.lineWidth = 1; ctx.strokeStyle = col; ctx.stroke();
+  }
+  ctx.fillStyle = C.dim; ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "left"; ctx.fillText("warp lanes t0…t31", pad, wy - 4);
+
+  // cache-line rows: a slot is bright if some lane reads it, dim (wasted) otherwise
+  const top = wy + wh + 20, gap = 6, lh = Math.min(28, (VH - top - 34) / lines - gap), sw = ww / LINE;
+  for (let l = 0; l < lines; l++) {
+    const ly = top + l * (lh + gap);
+    rr(ctx, pad, ly, ww, lh, 6); ctx.fillStyle = "#0a0f18"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = "#22324a"; ctx.stroke();
+    for (let e = 0; e < LINE; e++) {
+      const touched = ((l * LINE + e) % stride) === 0, sx = pad + e * sw;
+      rr(ctx, sx + 1, ly + 3, sw - 2, lh - 6, 2);
+      if (touched) { ctx.fillStyle = col; ctx.globalAlpha = 0.85; ctx.fill(); ctx.globalAlpha = 1; }
+      else { ctx.fillStyle = "#13202f"; ctx.fill(); }
+    }
+  }
+  const by = top + lines * (lh + gap) + 4;
+  ctx.fillStyle = col; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    stride === 1 ? "coalesced — one transaction serves the whole warp · 0% wasted"
+                 : `${Math.round((1 - eff) * 100)}% of every fetched cache line is discarded` + (capped ? `  (showing 8 of ${stride} lines)` : ""),
+    VW / 2, by + 12,
+  );
+};
+
+export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo, cuda, cudaCoalesce: coalesce };
