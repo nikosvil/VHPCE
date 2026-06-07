@@ -54,6 +54,12 @@ Playground code) go through one async backend; **Model mode is the only offline 
   (gang/worker/vector) — + a data table (`reference/entries.ts`) where each entry maps to an
   archetype + params, so coverage grows by adding *data*, not code. Deep-linkable via
   `/reference?id=<entryId>`. The selected entry follows the active filter/search.
+- **Heat Lab** (`/lab`) — an interactive **2-D heat-equation** mini-lab (P5 domain module): an explicit
+  finite-difference (FTCS Jacobi) stencil on a 128×128 grid, animated as a heatmap (offline, no
+  backend). Controls: play/step/reset, diffusivity α (with a visible α≤0.25 stability cliff), speed.
+  A **domain-decomposition overlay** (none / OpenMP / MPI / GPU) shows how the same stencil splits —
+  OpenMP shared rows, MPI blocks + **halo rings** (links to the MPI Halo Exchange experiment), GPU
+  tiles — the bridge tying the whole curriculum together.
 - **Flagship** (`/`) — five experiments (false sharing, synchronization, bandwidth saturation,
   load imbalance, **MPI halo exchange**), each with: model + **measured** data behind a
   **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a **2D | 3D**
@@ -116,8 +122,9 @@ pnpm --filter web dev                                                          #
 
 - **Ports:** web `:3000`, gateway api `:8000`, redis `:6379`. Browser reaches the gateway at
   `http://localhost:8000` (override with `NEXT_PUBLIC_VHPCE_API`).
-- **Routes:** `/learn` (Basics — concept animations), `/reference` (command library — offline), `/`
-  (Flagship), `/playground` (Code Playground), `POST|GET /api/ask` (LLM, Next route).
+- **Routes:** `/learn` (Basics — concept animations), `/reference` (command library — offline),
+  `/lab` (Heat-equation mini-lab — offline), `/` (Flagship), `/playground` (Code Playground),
+  `POST|GET /api/ask` (LLM, Next route).
   Gateway: `GET /api/health`, `POST /api/jobs`, `GET /api/jobs/{id}`.
 - **Ask-the-AI:** set `ANTHROPIC_API_KEY` in `apps/web/.env.local` (then restart) **or** paste a key
   in the panel (kept per-tab only).
@@ -144,7 +151,8 @@ vhpce/
 │           ├─ Flagship.tsx        flagship shell: state, Model|Measured, recompute, charts, AskAI
 │           ├─ Playground.tsx      Monaco editor + run/profile + result + cache panel (+ worked examples)
 │           ├─ AskAI.tsx           streaming LLM panel (grounded)
-│           ├─ Nav.tsx             top nav (Learn | Reference | Flagship | Playground)
+│           ├─ Nav.tsx             top nav (Learn | Reference | Heat Lab | Flagship | Playground)
+│           ├─ Lab.tsx             /lab 2-D heat-equation sim + domain-decomposition overlay
 │           ├─ Learn.tsx           /learn beginner concept cards (+ learn/scenes.ts Canvas animations)
 │           ├─ Reference.tsx       /reference command library (+ reference/archetypes.ts + entries.ts)
 │           ├─ Term.tsx · glossary.ts   hover-glossary tooltips (/reference + Flagship/Playground metric labels & hints)
