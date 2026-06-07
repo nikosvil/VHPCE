@@ -73,6 +73,29 @@ int main(void) {
 `,
   },
   {
+    id: "sync",
+    label: "Sync cost (atomic)",
+    blurb: "Accumulate with #pragma omp atomic — every iteration serializes on one update, so it barely scales (or gets slower).",
+    source: `/* Synchronization cost: every iteration does an atomic update to ONE shared
+   counter, so the threads serialize on it. Watch the speedup stay near 1 (or drop) —
+   then compare with the 'Parallel sum' reduction example, which avoids the shared write. */
+#include <stdio.h>
+#include <omp.h>
+
+int main(void) {
+    const long N = 60000000;
+    long sum = 0;
+    #pragma omp parallel for
+    for (long i = 0; i < N; i++) {
+        #pragma omp atomic
+        sum += 1;            /* the bottleneck: one shared counter */
+    }
+    printf("sum=%ld on %d threads\\n", sum, omp_get_max_threads());
+    return 0;
+}
+`,
+  },
+  {
     id: "triad",
     label: "Bandwidth (triad)",
     blurb: "STREAM triad over big arrays — memory-bound, so it stops scaling once DRAM saturates.",

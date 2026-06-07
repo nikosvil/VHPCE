@@ -43,7 +43,7 @@ Playground code) go through one async backend; **Model mode is the only offline 
   OpenMP cards → a runnable Playground example (`/playground?ex=…`), MPI cards → the measured
   Flagship experiment (`/?exp=mpiHalo`).
 - **Command Reference** (`/reference`) — a searchable, filterable library of **OpenMP, MPI & OpenACC
-  directives/commands** (~68 entries seeded), each with a "smart" looping animation, syntax, a
+  directives/commands** (~99 entries, incl. OpenMP `target` offloading + the long tail), each with a "smart" looping animation, syntax, a
   plain-English summary, a "good to know" note, hover-glossary `<Term>`s, related links (cross-tech
   navigation resets the filter), and a "▶ Run in the Playground" link where it maps to a runnable
   example. **Archetype-driven**: **14** reusable Canvas animations (`reference/archetypes.ts`) — incl.
@@ -75,8 +75,8 @@ Playground code) go through one async backend; **Model mode is the only offline 
 - **Code Playground** (`/playground`) — Monaco editor → compile + thread-sweep arbitrary OpenMP C
   in a **locked-down Docker container**; measured scaling + generic reading + **opt-in cachegrind**
   cache-miss profiling (D1/LLd miss rates). A row of **one-click worked examples** (parallel sum,
-  hello-threads, false sharing, STREAM triad) lets beginners run real code without writing it;
-  deep-linkable via `?ex=<id>` (the `/learn` cards point here).
+  hello-threads, false sharing, sync cost (atomic), STREAM triad) lets beginners run real code
+  without writing it; deep-linkable via `?ex=<id>` (the `/learn` + `/reference` pages point here).
 - **Cloud gateway** (`services/api`) — **FastAPI + Redis + Arq**, run via `docker-compose`. The
   Flagship's Measured mode and the Playground both **submit jobs and poll**: `POST /api/jobs`
   (`{kind:"bench"|"code", ...}`) → `GET /api/jobs/{id}`. The Arq worker (`max_jobs=1`, serialized for
