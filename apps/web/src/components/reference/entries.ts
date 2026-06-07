@@ -10,7 +10,8 @@ export type RefEntry = {
   tech: Tech;
   category: string;
   name: string;        // the directive / call as written
-  signature: string;   // canonical syntax
+  signature: string;   // canonical syntax (C / C++)
+  signatureF?: string; // explicit Fortran form (else derived by toFortran)
   summary: string;     // one-sentence plain-English meaning
   note?: string;       // short "good to know" / when-to-use / gotcha
   visual: { archetype: string; params?: ArchetypeParams };
