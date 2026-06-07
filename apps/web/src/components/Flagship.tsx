@@ -15,6 +15,12 @@ import { Explain, ExplainMeasured } from "@vhpce/explain";
 import { drawScaling, drawRoofline, drawOccupancy, scenes } from "@vhpce/viz";
 import { fmt, type ExperimentResult, type RunnerData, type Explanation } from "@vhpce/profile-schema";
 import { health, runJob } from "../lib/runner";
+import Term from "./Term";
+import { GLOSSARY } from "./glossary";
+
+// Wrap a label in a hover-glossary <Term> when it matches a known term, else plain text.
+const termify = (label: string) =>
+  GLOSSARY[label.toLowerCase()] ? <Term k={label.toLowerCase()}>{label}</Term> : label;
 
 const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null }>> = {
   falseSharing: FalseSharingScene3D,
@@ -282,7 +288,7 @@ export default function Flagship() {
                   <div className="track"><div className="knob" /></div>
                   <span style={{ fontSize: 12, color: "var(--muted)" }}>align each counter to 64 B</span>
                 </div>
-                <div className="fixhint">The fix: give every thread its own cache line so writes stop invalidating each other.</div>
+                <div className="fixhint">The fix: give every thread its own <Term k="cache line">cache line</Term> so writes stop invalidating each other.</div>
               </div>
               {!measured && (
                 <div className="ctrl">
@@ -302,7 +308,7 @@ export default function Flagship() {
                   <button key={k} className={p.mode === k ? "on" : ""} onClick={() => setParam({ mode: k })}>{lab}</button>
                 ))}
               </div>
-              <div className="fixhint">The fix: reduction — sum into private partials, combine once at the end.</div>
+              <div className="fixhint">The fix: <Term k="reduction">reduction</Term> — sum into private partials, combine once at the end.</div>
             </div>
           )}
 
@@ -313,7 +319,7 @@ export default function Flagship() {
                   <label>Arithmetic intensity<b>{fmt(p.ai, 2)} F/B</b></label>
                   <input type="range" min={0.03} max={8} step={0.01} value={p.ai}
                     onChange={(e) => setParam({ ai: +e.target.value })} />
-                  <div className="fixhint">The fix: raise arithmetic intensity (FLOPs per byte) to climb off the memory ceiling.</div>
+                  <div className="fixhint">The fix: raise <Term k="arithmetic intensity">arithmetic intensity</Term> (FLOPs per byte) to climb off the memory ceiling.</div>
                 </>
               ) : (
                 <div className="fixhint">
@@ -362,7 +368,7 @@ export default function Flagship() {
                     <button key={k} className={p.variant === k ? "on" : ""} onClick={() => setParam({ variant: k })}>{lab}</button>
                   ))}
                 </div>
-                <div className="fixhint">The fix: cut registers/thread (a lighter kernel or <code>__launch_bounds__</code>) so more warps fit per SM — occupancy climbs.</div>
+                <div className="fixhint">The fix: cut registers/thread (a lighter kernel or <code>__launch_bounds__</code>) so more <Term k="warp">warps</Term> fit per SM — <Term k="occupancy">occupancy</Term> climbs.</div>
               </div>
             </>
           )}
@@ -402,7 +408,7 @@ export default function Flagship() {
             ) : (
               result?.metrics.map((m, idx) => (
                 <div className="metric" key={idx}>
-                  <span className="k">{m.k}</span>
+                  <span className="k">{termify(m.k)}</span>
                   <span className={"v " + (m.tone || "")}>{m.v}</span>
                 </div>
               ))

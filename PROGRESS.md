@@ -146,7 +146,7 @@ vhpce/
 │           ├─ Nav.tsx             top nav (Learn | Reference | Flagship | Playground)
 │           ├─ Learn.tsx           /learn beginner concept cards (+ learn/scenes.ts Canvas animations)
 │           ├─ Reference.tsx       /reference command library (+ reference/archetypes.ts + entries.ts)
-│           ├─ Term.tsx · glossary.ts   hover-glossary tooltips (used in /reference + /learn)
+│           ├─ Term.tsx · glossary.ts   hover-glossary tooltips (/reference + Flagship/Playground metric labels & hints)
 │           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance,Mpi,Cuda}Scene3D
 │
 ├─ packages/                       shared TS (transpiled by Next, no build step)
