@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { archetypes } from "./reference/archetypes";
 import { ENTRIES, TECHS, type RefEntry, type Tech } from "./reference/entries";
+import { toFortran } from "./reference/fortran";
 import { GLOSSARY_KEYS } from "./glossary";
 import Term from "./Term";
 import Glossed from "./Glossed";
@@ -16,6 +17,7 @@ export default function Reference() {
   const [filter, setFilter] = useState<Filter>("All");
   const [q, setQ] = useState("");
   const [selId, setSelId] = useState<string>(ENTRIES[0].id);
+  const [lang, setLang] = useState<"C" | "Fortran">("C");
 
   // Deep-link: /reference?id=<entryId>
   useEffect(() => {
@@ -128,8 +130,12 @@ export default function Reference() {
             <h2 style={{ margin: 0, textTransform: "none", letterSpacing: 0, fontSize: 16, color: "var(--text)" }}>{sel.name}</h2>
             <span className={"ref-tech " + sel.tech.toLowerCase()}>{sel.tech}</span>
             <span className="ref-cat-tag">{sel.category}</span>
+            <span className="view-toggle" style={{ marginLeft: "auto" }}>
+              <button className={lang === "C" ? "on" : ""} onClick={() => setLang("C")}>C</button>
+              <button className={lang === "Fortran" ? "on" : ""} onClick={() => setLang("Fortran")}>Fortran</button>
+            </span>
           </div>
-          <pre className="code ref-sig">{sel.signature.split("\n").map((ln, i) => <div className="ln" key={i}>{ln || " "}</div>)}</pre>
+          <pre className="code ref-sig">{(lang === "Fortran" ? (sel.signatureF ?? toFortran(sel.signature, sel.tech)) : sel.signature).split("\n").map((ln, i) => <div className="ln" key={i}>{ln || " "}</div>)}</pre>
           <p className="ref-summary"><Glossed>{sel.summary}</Glossed></p>
           <div className="ref-canvas"><canvas className="viz" ref={canvasRef} /></div>
           {sel.note && (

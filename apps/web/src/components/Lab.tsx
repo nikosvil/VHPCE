@@ -28,6 +28,54 @@ function seed(u: Float32Array) {
   for (let i = lo; i < hi; i++) for (let j = lo; j < hi; j++) u[idx(i, j)] = 1;
 }
 
+// The SAME stencil, written for each execution model — the direct tie to OpenMP/MPI/GPU.
+const MODELS: Record<string, { label: string; t: string; note: string; code: string; links: { href: string; label: string }[] }> = {
+  off: {
+    label: "serial", t: "Serial baseline",
+    note: "One thread sweeps the whole grid each step — the baseline every parallel version below speeds up.",
+    code: `for (i = 1; i < N-1; i++)
+  for (j = 1; j < N-1; j++)
+    un[i][j] = u[i][j] + a*(u[i-1][j] + u[i+1][j]
+             + u[i][j-1] + u[i][j+1] - 4*u[i][j]);`,
+    links: [{ href: "/learn", label: "what parallel means →" }],
+  },
+  openmp: {
+    label: "OpenMP", t: "OpenMP — shared memory",
+    note: "Threads share the one grid, so you just split the rows — no copies, no halos. collapse(2) flattens the i,j loops for more parallelism.",
+    code: `#pragma omp parallel for collapse(2)
+for (i = 1; i < N-1; i++)
+  for (j = 1; j < N-1; j++)
+    un[i][j] = u[i][j] + a*(u[i-1][j] + u[i+1][j]
+             + u[i][j-1] + u[i][j+1] - 4*u[i][j]);`,
+    links: [{ href: "/reference?id=omp_parallel_for", label: "omp parallel for" }, { href: "/reference?id=omp_collapse", label: "collapse" }],
+  },
+  mpi: {
+    label: "MPI", t: "MPI — halo exchange",
+    note: "Each rank owns a slab of rows and must receive its neighbours' edge rows (the halo) before it can compute — that exchange is the communication the Halo Exchange experiment measures.",
+    code: `/* exchange halo rows with neighbours, THEN compute */
+MPI_Sendrecv(&u[lo][0],   N, MPI_DOUBLE, up,   0,
+             &u[hi+1][0], N, MPI_DOUBLE, down, 0, comm, &st);
+MPI_Sendrecv(&u[hi][0],   N, MPI_DOUBLE, down, 1,
+             &u[lo-1][0], N, MPI_DOUBLE, up,   1, comm, &st);
+for (i = lo; i <= hi; i++)              /* local rows only */
+  for (j = 1; j < N-1; j++)
+    un[i][j] = u[i][j] + a*( /* 4-neighbour stencil */ );`,
+    links: [{ href: "/reference?id=mpi_sendrecv", label: "MPI_Sendrecv" }, { href: "/?exp=mpiHalo", label: "Halo Exchange experiment" }],
+  },
+  gpu: {
+    label: "GPU / CUDA", t: "GPU — one thread per cell",
+    note: "Launch a 2-D grid of thread blocks, one thread per cell. Fast versions stage each block's tile (plus its halo) into shared memory to cut global-memory traffic.",
+    code: `__global__ void step(const double *u, double *un, int N, double a) {
+  int i = blockIdx.y*blockDim.y + threadIdx.y;
+  int j = blockIdx.x*blockDim.x + threadIdx.x;
+  if (i>0 && i<N-1 && j>0 && j<N-1)
+    un[i*N+j] = u[i*N+j] + a*(u[(i-1)*N+j] + u[(i+1)*N+j]
+              + u[i*N+j-1] + u[i*N+j+1] - 4*u[i*N+j]);
+}`,
+    links: [{ href: "/?exp=cuda", label: "GPU Occupancy experiment" }],
+  },
+};
+
 export default function Lab() {
   const [playing, setPlaying] = useState(true);
   const [alpha, setAlpha] = useState(0.20);   // diffusivity (stable for ≤ 0.25)
@@ -165,12 +213,17 @@ export default function Lab() {
         </section>
 
         <section className="card explain">
-          <h2>What you&apos;re seeing</h2>
-          <div className="blocks" style={{ gridTemplateColumns: "1fr" }}>
-            <div className="eb what"><div className="t">The stencil</div><div className="body"><Glossed>{"Each step, every cell relaxes toward the average of its 4 neighbours — a 5-point stencil. A hot square in the centre is held fixed; the cold edges are held at 0, so heat diffuses outward to a steady state."}</Glossed></div></div>
-            <div className="eb why"><div className="t">Why it parallelizes well</div><div className="body"><Glossed>{"Every cell's update is independent within a step and only reads neighbours — embarrassingly parallel with a thin dependency. That is exactly the structure OpenMP, MPI and GPUs exploit."}</Glossed></div></div>
-            <div className="eb how"><div className="t">…and where it gets hard</div><div className="body"><Glossed>{"Split across MPI ranks, each block needs its neighbours' edge rows — the halo. Exchanging halos every step is the communication that the "}</Glossed><Link href="/?exp=mpiHalo">MPI Halo Exchange</Link> experiment measures.</div></div>
-            <div className="eb exp"><div className="t">Try</div><div className="body">Flip the decomposition overlay; raise α past 0.25 to break stability; speed it up to reach steady state. Then see the directives in the <Link href="/reference">Reference</Link> (e.g. <Link href="/reference?id=mpi_sendrecv">MPI_Sendrecv</Link>, <Link href="/reference?id=omp_parallel_for">omp parallel for</Link>).</div></div>
+          <h2><span>This stencil in {MODELS[decomp].label}</span><span className="scene-tag">pick a model →</span></h2>
+          <p className="learn-blurb"><Glossed>{"Every cell relaxes toward the average of its 4 neighbours (a 5-point stencil) — independent within a step, so it parallelizes well. Here's the SAME update written for each model; switch the decomposition control to compare."}</Glossed></p>
+          <div className="code">
+            {MODELS[decomp].code.split("\n").map((ln, i) => <div className="ln" key={i}>{ln || " "}</div>)}
+          </div>
+          <div className="eb how" style={{ marginTop: 12 }}>
+            <div className="t">{MODELS[decomp].t}</div>
+            <div className="body"><Glossed>{MODELS[decomp].note}</Glossed></div>
+          </div>
+          <div className="ref-related" style={{ marginTop: 10 }}>
+            {MODELS[decomp].links.map((l) => <Link key={l.href} className="learn-link" style={{ marginTop: 0 }} href={l.href}>{l.label}</Link>)}
           </div>
         </section>
       </div>

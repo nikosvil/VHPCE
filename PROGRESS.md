@@ -53,13 +53,17 @@ Playground code) go through one async backend; **Model mode is the only offline 
   OpenACC `offload` (host↔device), `accData` (copyin/out/create/present/update), and `gangs`
   (gang/worker/vector) — + a data table (`reference/entries.ts`) where each entry maps to an
   archetype + params, so coverage grows by adding *data*, not code. Deep-linkable via
-  `/reference?id=<entryId>`. The selected entry follows the active filter/search.
+  `/reference?id=<entryId>`. The selected entry follows the active filter/search. A **C | Fortran**
+  toggle shows each signature in both languages (derived: `!$omp`/`!$acc` sentinels + `end` directives,
+  `for`→`do`; MPI `call …(…, ierror)` with Fortran type names — overridable via `signatureF`).
 - **Heat Lab** (`/lab`) — an interactive **2-D heat-equation** mini-lab (P5 domain module): an explicit
   finite-difference (FTCS Jacobi) stencil on a 128×128 grid, animated as a heatmap (offline, no
   backend). Controls: play/step/reset, diffusivity α (with a visible α≤0.25 stability cliff), speed.
   A **domain-decomposition overlay** (none / OpenMP / MPI / GPU) shows how the same stencil splits —
   OpenMP shared rows, MPI blocks + **halo rings** (links to the MPI Halo Exchange experiment), GPU
-  tiles — the bridge tying the whole curriculum together.
+  tiles. Picking a model also swaps in the **actual stencil code** for it (serial → `omp parallel for`
+  → `MPI_Sendrecv` halo exchange → CUDA kernel) with links to the matching Reference entry + Flagship
+  experiment — the direct tie from the picture to real OpenMP/MPI/GPU code.
 - **Flagship** (`/`) — five experiments (false sharing, synchronization, bandwidth saturation,
   load imbalance, **MPI halo exchange**), each with: model + **measured** data behind a
   **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a **2D | 3D**
