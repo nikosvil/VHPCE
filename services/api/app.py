@@ -69,7 +69,8 @@ class MpiJob(BaseModel):
 
 class CudaJob(BaseModel):
     kind: Literal["cuda"]
-    variant: str               # "light" | "heavy"
+    experiment: str = "occupancy"   # "occupancy" | "coalesce" | "divergence"
+    variant: str = "heavy"          # occupancy: "light"|"heavy"; others ignore it
 
 
 JobSubmit = Annotated[Union[BenchJob, CodeJob, MpiJob, CudaJob], Field(discriminator="kind")]
@@ -99,13 +100,13 @@ async def submit(job: JobSubmit):
         j = await redis.enqueue_job("run_mpi_task", job.variant, maxr)
         return {"id": j.job_id, "status": "queued"}
     if job.kind == "cuda":
-        if job.variant not in settings.ALLOWED_CUDA:
+        if job.experiment not in settings.ALLOWED_CUDA_EXP:
             return {"id": None, "status": "error",
-                    "result": {"error": "badrequest", "message": f"unknown cuda variant: {job.variant}"}}
-        cached = await redis.get(f"cuda:{job.variant}")
+                    "result": {"error": "badrequest", "message": f"unknown cuda experiment: {job.experiment}"}}
+        cached = await redis.get(f"cuda:{job.experiment}:{job.variant}")
         if cached:
             return {"id": None, "status": "done", "result": json.loads(cached), "cached": True}
-        j = await redis.enqueue_job("run_cuda_task", job.variant)
+        j = await redis.enqueue_job("run_cuda_task", job.experiment, job.variant)
         return {"id": j.job_id, "status": "queued"}
     # kind == "code"
     j = await redis.enqueue_job("run_code_task", job.source, job.threads, job.reps, job.profile)

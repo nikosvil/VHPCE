@@ -107,11 +107,12 @@ async def run_mpi_task(ctx, variant, maxranks):
     return data
 
 
-async def run_cuda_task(ctx, variant):
-    """GPU occupancy block-size sweep: `docker run --gpus all vhpce-cuda <variant>`.
-    The kernel sweeps block sizes internally and reports real occupancy (CUDA Occupancy API)."""
-    if variant not in settings.ALLOWED_CUDA:
-        return {"error": "badrequest", "message": f"unknown cuda variant: {variant}"}
+async def run_cuda_task(ctx, experiment, variant):
+    """GPU experiments via `docker run --gpus all vhpce-cuda <experiment> <variant>`:
+    occupancy (block-size sweep + Occupancy API), coalesce (stride sweep, GB/s),
+    divergence (warp-path sweep, time). Real device runs on the RTX 5060."""
+    if experiment not in settings.ALLOWED_CUDA_EXP:
+        return {"error": "badrequest", "message": f"unknown cuda experiment: {experiment}"}
     cmd = [
         "docker", "run", "--rm",
         "--gpus", "all",                       # pass the RTX 5060 into the container
@@ -122,7 +123,7 @@ async def run_cuda_task(ctx, variant):
         "--pids-limit", "256",
         "--read-only", "--tmpfs", "/tmp:rw,exec,size=256m",
         settings.CUDA_IMAGE,
-        variant,
+        experiment, variant,
     ]
     try:
         rc, out, err = await _run(cmd, timeout=settings.CUDA_RUN_TIMEOUT)
@@ -138,7 +139,7 @@ async def run_cuda_task(ctx, variant):
         data["source"] = "measured"
         data["cores"] = os.cpu_count()
         data["machine"] = "docker-local-gpu"
-        await ctx["redis"].set(f"cuda:{variant}", json.dumps(data), ex=settings.BENCH_CACHE_TTL)
+        await ctx["redis"].set(f"cuda:{experiment}:{variant}", json.dumps(data), ex=settings.BENCH_CACHE_TTL)
     return data
 
 

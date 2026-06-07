@@ -7,12 +7,14 @@ import BandwidthScene3D from "./scenes/BandwidthScene3D";
 import ImbalanceScene3D from "./scenes/ImbalanceScene3D";
 import MpiScene3D from "./scenes/MpiScene3D";
 import CudaScene3D from "./scenes/CudaScene3D";
+import CoalesceScene3D from "./scenes/CoalesceScene3D";
+import DivergenceScene3D from "./scenes/DivergenceScene3D";
 import AskAI from "./AskAI";
 import {
   Models, Measured, runnerSpec, EXPERIMENTS, MAXP, TRIAD_AI,
 } from "@vhpce/perf-models";
 import { Explain, ExplainMeasured } from "@vhpce/explain";
-import { drawScaling, drawRoofline, drawOccupancy, scenes } from "@vhpce/viz";
+import { drawScaling, drawRoofline, drawOccupancy, drawSweep, scenes } from "@vhpce/viz";
 import { fmt, type ExperimentResult, type RunnerData, type Explanation } from "@vhpce/profile-schema";
 import { health, runJob } from "../lib/runner";
 import Term from "./Term";
@@ -29,6 +31,8 @@ const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null 
   imbalance: ImbalanceScene3D,
   mpiHalo: MpiScene3D,
   cuda: CudaScene3D,
+  cudaCoalesce: CoalesceScene3D,
+  cudaDivergence: DivergenceScene3D,
 };
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, "");
@@ -40,9 +44,13 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
   const metrics = r.metrics.map((m) => `${m.k} ${m.v}`).join("; ");
   return [
     `Experiment: ${name} (${mode} data; source=${r.source}).`,
-    r.xUnits === "block"
+    r.experimentId === "cuda"
       ? `Current point: ${c.x} threads/block — occupancy ${fmt((r.occupancy ?? c.efficiency) * 100, 0)}%, performance ${fmt(c.speedup * 100, 0)}% of the sweep's best (limiter: ${r.limiter ?? "n/a"}).`
-      : `Current point: ${c.x} of 24 ${r.xUnits === "ranks" ? "ranks" : "threads"} — speedup ${fmt(c.speedup, 2)}×, efficiency ${fmt(c.efficiency * 100, 0)}%.`,
+      : r.experimentId === "cudaCoalesce"
+        ? `Current point: stride ${c.x} — achieved bandwidth ${fmt(r.bw ?? 0, 0)} GB/s = ${fmt(c.efficiency * 100, 0)}% of the coalesced (stride-1) peak; ${fmt((1 - c.efficiency) * 100, 0)}% of fetched bandwidth wasted.`
+        : r.experimentId === "cudaDivergence"
+          ? `Current point: ${c.x} divergent path${c.x > 1 ? "s" : ""} — warp runs ${fmt(r.factor ?? 1 / (c.efficiency || 1), 1)}× slower than uniform; ~${fmt(c.efficiency * 100, 0)}% of lanes active per pass (${fmt((1 - c.efficiency) * 100, 0)}% of lane-cycles idle).`
+          : `Current point: ${c.x} of 24 ${r.xUnits === "ranks" ? "ranks" : "threads"} — speedup ${fmt(c.speedup, 2)}×, efficiency ${fmt(c.efficiency * 100, 0)}%.`,
     `On-screen metrics: ${metrics}.`,
     `Deterministic finding:`,
     `- What: ${stripHtml(e.what)}`,
@@ -52,7 +60,7 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
   ].join("\n");
 }
 
-type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda";
+type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda" | "cudaCoalesce" | "cudaDivergence";
 type Mode = "model" | "measured";
 
 const DEFAULT_PARAMS: Record<ExpId, any> = {
@@ -62,7 +70,11 @@ const DEFAULT_PARAMS: Record<ExpId, any> = {
   imbalance: { threads: 24, sched: "static" },
   mpiHalo: { ranks: 24, mode: "strong" },
   cuda: { blockSize: 256, variant: "heavy" },
+  cudaCoalesce: { stride: 8 },
+  cudaDivergence: { paths: 8 },
 };
+
+const STRIDES = [1, 2, 4, 8, 16, 32];
 
 export default function Flagship() {
   const [exp, setExp] = useState<ExpId>("falseSharing");
@@ -87,6 +99,9 @@ export default function Flagship() {
   const use3D = view === "3d";
   const Scene3D = SCENES_3D[exp];
   const isCuda = exp === "cuda";
+  const isCoalesce = exp === "cudaCoalesce";
+  const isDiverge = exp === "cudaDivergence";
+  const cudaFam = isCuda || isCoalesce || isDiverge;
   const xKey = exp === "mpiHalo" ? "ranks" : "threads";   // degree-of-parallelism param
   const xLabel = exp === "mpiHalo" ? "Ranks" : "Threads";
   const xUnits = result?.xUnits === "ranks" ? "ranks" : "threads";
@@ -123,13 +138,22 @@ export default function Flagship() {
     }
     const isMpi = exp === "mpiHalo";
     const isCuda = exp === "cuda";
+    const isCoalesce = exp === "cudaCoalesce";
+    const isDiverge = exp === "cudaDivergence";
+    const cudaExp = isDiverge ? "divergence" : isCoalesce ? "coalesce" : "occupancy";
     const { bexp, variant } = runnerSpec(exp, cp);
-    const key = isCuda ? "cuda/" + cp.variant : isMpi ? "mpi/" + cp.mode : bexp + "/" + variant;
+    // The CUDA runner sweeps the whole stride/paths range in one pass, so coalesce & divergence
+    // cache by experiment only — moving the slider just re-selects a point from the same data.
+    const key = isDiverge ? "cuda/divergence"
+      : isCoalesce ? "cuda/coalesce"
+      : isCuda ? "cuda/" + cp.variant
+      : isMpi ? "mpi/" + cp.mode
+      : bexp + "/" + variant;
     const cached = cacheRef.current[key];
     if (cached) { setResult(Measured[exp](cp, cached)); return; }
     setLoading(true);
-    const body = isCuda
-      ? { kind: "cuda" as const, variant: cp.variant }
+    const body = isCuda || isCoalesce || isDiverge
+      ? { kind: "cuda" as const, experiment: cudaExp, variant: cp.variant ?? "heavy" }
       : isMpi
         ? { kind: "mpi" as const, variant: cp.mode, maxranks: MAXP }
         : { kind: "bench" as const, exp: bexp, variant, maxthreads: MAXP };
@@ -155,6 +179,7 @@ export default function Flagship() {
     if (!result) return;
     if (scalingRef.current) {
       if (result.experimentId === "cuda") drawOccupancy(scalingRef.current, result);
+      else if (result.experimentId === "cudaCoalesce" || result.experimentId === "cudaDivergence") drawSweep(scalingRef.current, result);
       else drawScaling(scalingRef.current, result);
     }
     if (result.experimentId === "bandwidth" && rooflineRef.current) drawRoofline(rooflineRef.current, result);
@@ -167,6 +192,7 @@ export default function Flagship() {
       if (!r) return;
       if (scalingRef.current) {
         if (r.experimentId === "cuda") drawOccupancy(scalingRef.current, r);
+        else if (r.experimentId === "cudaCoalesce" || r.experimentId === "cudaDivergence") drawSweep(scalingRef.current, r);
         else drawScaling(scalingRef.current, r);
       }
       if (r.experimentId === "bandwidth" && rooflineRef.current) drawRoofline(rooflineRef.current, r);
@@ -270,7 +296,7 @@ export default function Flagship() {
       <div className="grid">
         <section className="card">
           <h2>Controls</h2>
-          {exp !== "cuda" && (
+          {!cudaFam && (
             <div className="ctrl">
               <label>{xLabel}<b>{p[xKey]}</b></label>
               <input type="range" min={1} max={MAXP} step={1} value={p[xKey]}
@@ -372,6 +398,30 @@ export default function Flagship() {
               </div>
             </>
           )}
+
+          {exp === "cudaCoalesce" && (
+            <div className="ctrl">
+              <label>Access stride<b>{p.stride === 1 ? "1 (coalesced)" : p.stride}</b></label>
+              <div className="seg fix">
+                {STRIDES.map((s) => (
+                  <button key={s} className={p.stride === s ? "on" : ""} onClick={() => setParam({ stride: s })}>{s === 1 ? "1 ✓" : s}</button>
+                ))}
+              </div>
+              <div className="fixhint">The fix: make the inner index <b>unit-stride</b> so a <Term k="warp">warp</Term>’s 32 lanes fall in one 128-byte cache line — <Term k="coalescing">coalesced</Term> access, full bandwidth.</div>
+            </div>
+          )}
+
+          {exp === "cudaDivergence" && (
+            <div className="ctrl">
+              <label>Divergent paths<b>{p.paths === 1 ? "1 (uniform)" : p.paths}</b></label>
+              <div className="seg fix">
+                {STRIDES.map((d) => (
+                  <button key={d} className={p.paths === d ? "on" : ""} onClick={() => setParam({ paths: d })}>{d === 1 ? "1 ✓" : d}</button>
+                ))}
+              </div>
+              <div className="fixhint">The fix: keep branches <b>warp-uniform</b> (sort/bin by condition, or go branchless) so a <Term k="warp">warp</Term> takes one path and never serializes — no <Term k="warp divergence">divergence</Term>.</div>
+            </div>
+          )}
         </section>
 
         <section className="card vizwrap">
@@ -392,19 +442,28 @@ export default function Flagship() {
           <h2>Live metrics</h2>
           <div className="hero">
             <div className="big" style={{ color: heroColor }}>
-              {loading ? "•••" : cur ? (isCuda ? fmt((result?.occupancy ?? cur.efficiency) * 100, 0) + "%" : fmt(cur.speedup, 1) + "×") : "—"}
+              {loading ? "•••"
+                : cur
+                  ? isCuda ? fmt((result?.occupancy ?? cur.efficiency) * 100, 0) + "%"
+                  : isCoalesce ? fmt(result?.bw ?? 0, 0)
+                  : isDiverge ? fmt(result?.factor ?? 1 / (cur.efficiency || 1), 1) + "×"
+                  : fmt(cur.speedup, 1) + "×"
+                  : "—"}
             </div>
             <div className="cap">
               {loading
-                ? (isCuda ? "measuring on the RTX 5060…" : `measuring on 24 ${xUnits === "ranks" ? "ranks" : "cores"}…`)
+                ? (cudaFam ? "measuring on the RTX 5060…" : `measuring on 24 ${xUnits === "ranks" ? "ranks" : "cores"}…`)
                 : cur
-                  ? (isCuda ? `occupancy at ${cur.x} threads/block` : `speedup on ${cur.x} of 24 ${xUnits === "ranks" ? "ranks" : "cores"}`)
-                  : (isCuda ? "occupancy" : "speedup")}
+                  ? isCuda ? `occupancy at ${cur.x} threads/block`
+                    : isCoalesce ? `GB/s · stride ${cur.x} · ${fmt(cur.efficiency * 100, 0)}% of coalesced peak`
+                    : isDiverge ? `slower than uniform · ${cur.x} path${cur.x > 1 ? "s" : ""} · ${fmt(cur.efficiency * 100, 0)}% lanes active`
+                    : `speedup on ${cur.x} of 24 ${xUnits === "ranks" ? "ranks" : "cores"}`
+                  : (isCuda ? "occupancy" : isCoalesce ? "GB/s" : isDiverge ? "warp slowdown" : "speedup")}
             </div>
           </div>
           <div>
             {loading ? (
-              <div className="metric"><span className="k">Compiling &amp; running OpenMP sweep…</span><span className="v accent">live</span></div>
+              <div className="metric"><span className="k">{cudaFam ? "Compiling & running CUDA sweep…" : "Compiling & running OpenMP sweep…"}</span><span className="v accent">live</span></div>
             ) : (
               result?.metrics.map((m, idx) => (
                 <div className="metric" key={idx}>
@@ -419,7 +478,7 @@ export default function Flagship() {
 
       <div className="lower">
         <section className="card">
-          <h2>{isCuda ? "Occupancy · 32 → 1024 threads/block" : `Scaling · 1 → ${MAXP} ${xUnits}`}</h2>
+          <h2>{isCuda ? "Occupancy · 32 → 1024 threads/block" : isCoalesce ? "Bandwidth efficiency · stride 1 → 32" : isDiverge ? "Throughput vs uniform · 1 → 32 paths" : `Scaling · 1 → ${MAXP} ${xUnits}`}</h2>
           <div className={"charts" + (exp === "bandwidth" ? " two" : "")}>
             <div className="chart">
               <svg ref={scalingRef} />
@@ -429,6 +488,16 @@ export default function Flagship() {
                     <span><i style={{ borderColor: "var(--accent)" }} />occupancy</span>
                     <span><i style={{ borderColor: "var(--accent2)" }} />performance</span>
                     <span><i style={{ borderColor: "var(--good)" }} />best block</span>
+                  </>
+                ) : isCoalesce ? (
+                  <>
+                    <span><i style={{ borderColor: "var(--accent)" }} />bandwidth vs coalesced peak</span>
+                    <span><i style={{ borderColor: "var(--accent2)" }} />stride points</span>
+                  </>
+                ) : isDiverge ? (
+                  <>
+                    <span><i style={{ borderColor: "var(--accent)" }} />throughput vs uniform</span>
+                    <span><i style={{ borderColor: "var(--accent2)" }} />path points</span>
                   </>
                 ) : (
                   <>

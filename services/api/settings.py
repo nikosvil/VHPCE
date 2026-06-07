@@ -40,3 +40,5 @@ ALLOWED = {
 ALLOWED_MPI = {"strong", "weak"}
 # GPU occupancy experiment: the two register-pressure profiles.
 ALLOWED_CUDA = {"light", "heavy"}
+# GPU experiments the vhpce-cuda image dispatches on.
+ALLOWED_CUDA_EXP = {"occupancy", "coalesce", "divergence"}
