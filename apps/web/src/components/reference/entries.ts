@@ -387,6 +387,58 @@ export const ENTRIES: RefEntry[] = [
     visual: { archetype: "forkJoin", params: { threads: 6 } }, related: ["omp_get_max_threads"],
   },
 
+  {
+    id: "omp_parallel_for_simd", tech: "OpenMP", category: "Work-sharing", name: "#pragma omp parallel for simd",
+    signature: "#pragma omp parallel for simd\nfor (i = 0; i < N; i++) a[i] = b[i] + c[i];",
+    summary: "Combines thread parallelism and SIMD vectorization on one loop — both axes at once.",
+    visual: { archetype: "worksharing", params: { kind: "for", threads: 4 } }, related: ["omp_simd", "omp_parallel_for"],
+  },
+  {
+    id: "omp_critical_named", tech: "OpenMP", category: "Synchronization", name: "#pragma omp critical(name)",
+    signature: "#pragma omp critical(bins)\n{ histogram[b]++; }",
+    summary: "A named critical section — only blocks against other criticals with the SAME name.",
+    note: "Naming lets independent critical regions run concurrently instead of all serializing together.",
+    visual: { archetype: "criticalAtomic", params: { kind: "critical" } }, related: ["omp_critical", "omp_atomic"],
+  },
+  {
+    id: "omp_dist_schedule", tech: "OpenMP", category: "Scheduling", name: "dist_schedule(static, chunk)",
+    signature: "#pragma omp distribute dist_schedule(static, 64)",
+    summary: "Controls how iterations are distributed across teams (the team-level analog of schedule).",
+    visual: { archetype: "schedule", params: { kind: "static" } }, related: ["omp_distribute", "omp_schedule_static"],
+  },
+  {
+    id: "omp_set_dynamic", tech: "OpenMP", category: "Runtime", name: "omp_set_dynamic / OMP_DYNAMIC",
+    signature: "omp_set_dynamic(1);   // allow the runtime to vary team size",
+    summary: "Lets the runtime adjust the number of threads per region to match the load/system.",
+    visual: { archetype: "forkJoin", params: { threads: 6 } }, related: ["omp_set_num_threads"],
+  },
+  {
+    id: "omp_target_enter_data", tech: "OpenMP", category: "Offloading (target)", name: "#pragma omp target enter data / exit data",
+    signature: "#pragma omp target enter data map(to: a[0:N])\n/* ... */\n#pragma omp target exit data map(from: a[0:N])",
+    summary: "Unstructured device-data lifetime: put data on the accelerator now, take it off later.",
+    note: "The OpenMP analog of OpenACC enter/exit data — not block-scoped.",
+    visual: { archetype: "accData", params: { clause: "copyin" } }, related: ["omp_target_data", "acc_enter_data"],
+  },
+  {
+    id: "omp_target_update", tech: "OpenMP", category: "Offloading (target)", name: "#pragma omp target update",
+    signature: "#pragma omp target update to(a[0:N])   // or from(...)",
+    summary: "Re-synchronizes the host and device copies of data without ending the data region.",
+    visual: { archetype: "accData", params: { clause: "update" } }, related: ["omp_map", "acc_update"],
+  },
+  {
+    id: "omp_requires", tech: "OpenMP", category: "Offloading (target)", name: "#pragma omp requires",
+    signature: "#pragma omp requires unified_shared_memory",
+    summary: "Declares features the program needs (e.g. unified memory, so host & device share addresses).",
+    note: "With unified_shared_memory you can often drop explicit map clauses.",
+    visual: { archetype: "offload", params: { kind: "parallel" } }, related: ["omp_target", "omp_map"],
+  },
+  {
+    id: "omp_defaultmap", tech: "OpenMP", category: "Offloading (target)", name: "defaultmap(...)",
+    signature: "#pragma omp target defaultmap(tofrom: scalar)",
+    summary: "Sets the default map behaviour for variables of a category in a target region.",
+    visual: { archetype: "accData", params: { clause: "copy" } }, related: ["omp_map", "acc_default_present"],
+  },
+
   /* ===================== MPI ===================== */
   {
     id: "mpi_init", tech: "MPI", category: "Setup", name: "MPI_Init / MPI_Finalize",
@@ -641,6 +693,64 @@ export const ENTRIES: RefEntry[] = [
     signature: "char name[MPI_MAX_PROCESSOR_NAME]; int len;\nMPI_Get_processor_name(name, &len);",
     summary: "Returns the node/host name a rank is running on — handy for mapping ranks to machines.",
     visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_comm_rank"],
+  },
+
+  {
+    id: "mpi_neighbor", tech: "MPI", category: "Collectives", name: "MPI_Neighbor_allgather / alltoall",
+    signature: "MPI_Neighbor_allgather(send, .., recv, .., cartComm);",
+    summary: "Collectives restricted to topology neighbours — exactly the pattern for halo exchanges.",
+    note: "On a Cartesian comm, each rank exchanges only with its grid neighbours, in one call.",
+    visual: { archetype: "collective", params: { op: "allgather" } }, related: ["mpi_cart_create", "mpi_sendrecv"],
+  },
+  {
+    id: "mpi_pack", tech: "MPI", category: "Point-to-point", name: "MPI_Pack / MPI_Unpack",
+    signature: "MPI_Pack(&x, 1, MPI_INT, buf, size, &pos, comm);  /* ... */ MPI_Send(buf, pos, MPI_PACKED, ..);",
+    summary: "Manually packs mixed data into one buffer to send together (alternative to derived datatypes).",
+    visual: { archetype: "pointToPoint", params: { mode: "blocking" } }, related: ["mpi_type_vector", "mpi_send"],
+  },
+  {
+    id: "mpi_send_init", tech: "MPI", category: "Point-to-point", name: "MPI_Send_init / MPI_Start (persistent)",
+    signature: "MPI_Send_init(buf, n, .., &req);\nfor (it...) { MPI_Start(&req); /* ... */ MPI_Wait(&req, ..); }",
+    summary: "Persistent requests: set up a repeated send/recv once, then cheaply re-fire it each iteration.",
+    note: "Cuts per-message setup cost in tight communication loops (e.g. time-stepping).",
+    visual: { archetype: "pointToPoint", params: { mode: "nonblocking" } }, related: ["mpi_isend", "mpi_wait"],
+  },
+  {
+    id: "mpi_type_struct", tech: "MPI", category: "Communicators", name: "MPI_Type_create_struct",
+    signature: "MPI_Type_create_struct(n, blocklens, displs, types, &t);\nMPI_Type_commit(&t);",
+    summary: "Builds a datatype describing a C struct (mixed field types) so you can send it in one message.",
+    visual: { archetype: "pointToPoint", params: { mode: "blocking" } }, related: ["mpi_type_vector", "mpi_pack"],
+  },
+  {
+    id: "mpi_group", tech: "MPI", category: "Communicators", name: "MPI_Group_incl / MPI_Comm_create",
+    signature: "MPI_Comm_group(comm, &g);\nMPI_Group_incl(g, n, ranks, &sub);\nMPI_Comm_create(comm, sub, &newcomm);",
+    summary: "Builds a sub-communicator from an explicit list of ranks (a group), for collectives on a subset.",
+    visual: { archetype: "ranksMemory", params: { threads: 6, kind: "split" } }, related: ["mpi_comm_split", "mpi_comm_dup"],
+  },
+  {
+    id: "mpi_dims_create", tech: "MPI", category: "Communicators", name: "MPI_Dims_create",
+    signature: "int dims[2] = {0,0}; MPI_Dims_create(size, 2, dims);",
+    summary: "Picks a balanced grid shape (e.g. 12 ranks → 4×3) to feed MPI_Cart_create.",
+    visual: { archetype: "ranksMemory", params: { threads: 6, kind: "split" } }, related: ["mpi_cart_create"],
+  },
+  {
+    id: "mpi_comm_free", tech: "MPI", category: "Setup", name: "MPI_Comm_free / MPI_Type_free",
+    signature: "MPI_Comm_free(&comm);  MPI_Type_free(&type);",
+    summary: "Releases communicators, datatypes, and other MPI objects you created — avoid leaks.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_comm_dup", "mpi_type_struct"],
+  },
+  {
+    id: "mpi_file_open", tech: "MPI", category: "Parallel I/O", name: "MPI_File_open / MPI_File_set_view",
+    signature: "MPI_File_open(comm, \"out.dat\", MPI_MODE_CREATE|MPI_MODE_WRONLY, info, &fh);\nMPI_File_set_view(fh, disp, etype, filetype, \"native\", info);",
+    summary: "Opens a shared file collectively; a 'view' gives each rank its own window into the file.",
+    note: "MPI-IO: all ranks read/write one file in parallel, each to its own region.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_file_write"],
+  },
+  {
+    id: "mpi_file_write", tech: "MPI", category: "Parallel I/O", name: "MPI_File_write_at_all / read_at_all",
+    signature: "MPI_File_write_at_all(fh, offset, buf, n, MPI_INT, &status);",
+    summary: "Each rank writes (or reads) its slice of a shared file at a given offset, collectively.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_file_open"],
   },
 
   /* ===================== OpenACC ===================== */
