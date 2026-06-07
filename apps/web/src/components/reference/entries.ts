@@ -310,6 +310,83 @@ export const ENTRIES: RefEntry[] = [
     visual: { archetype: "offload", params: { kind: "loop" } }, related: ["omp_teams", "acc_parallel_loop"],
   },
 
+  {
+    id: "omp_atomic_capture", tech: "OpenMP", category: "Synchronization", name: "atomic capture / read / write / update",
+    signature: "#pragma omp atomic capture\n{ old = v; v += x; }",
+    summary: "Atomic variants: read, write, update (default), or capture (atomically update AND fetch).",
+    note: "capture is how you grab a unique index/old value without a lock.",
+    visual: { archetype: "criticalAtomic", params: { kind: "atomic" } }, related: ["omp_atomic", "omp_critical"],
+  },
+  {
+    id: "omp_cancel", tech: "OpenMP", category: "Synchronization", name: "#pragma omp cancel",
+    signature: "#pragma omp cancel for   // + #pragma omp cancellation point",
+    summary: "Requests early termination of a parallel loop/region (e.g. once a search hits).",
+    note: "Needs OMP_CANCELLATION=true; threads stop at cancellation points.",
+    visual: { archetype: "barrier", params: { kind: "barrier" } }, related: ["omp_barrier"],
+  },
+  {
+    id: "omp_loop", tech: "OpenMP", category: "Work-sharing", name: "#pragma omp loop",
+    signature: "#pragma omp parallel loop\nfor (...) work(i);",
+    summary: "A newer, descriptive loop construct: you assert it's parallelizable, the runtime maps it.",
+    visual: { archetype: "worksharing", params: { kind: "for", threads: 4 } }, related: ["omp_parallel_for"],
+  },
+  {
+    id: "omp_masked", tech: "OpenMP", category: "Work-sharing", name: "#pragma omp masked",
+    signature: "#pragma omp masked [filter(0)]",
+    summary: "Like master but generalized — only the thread(s) matching the filter run the block (5.1+).",
+    visual: { archetype: "worksharing", params: { kind: "master" } }, related: ["omp_master", "omp_single"],
+  },
+  {
+    id: "omp_proc_bind", tech: "OpenMP", category: "Parallel regions", name: "proc_bind / OMP_PROC_BIND",
+    signature: "#pragma omp parallel proc_bind(close)   // or spread / master",
+    summary: "Controls thread affinity — whether threads pack together (close) or spread across the machine.",
+    note: "Affinity matters a lot for NUMA and cache locality; pair with OMP_PLACES.",
+    visual: { archetype: "forkJoin", params: { threads: 6 } }, related: ["omp_places", "omp_parallel"],
+  },
+  {
+    id: "omp_places", tech: "OpenMP", category: "Parallel regions", name: "OMP_PLACES",
+    signature: "export OMP_PLACES=cores   # or threads / sockets / explicit list",
+    summary: "Defines the hardware slots threads can be pinned to (cores, hardware threads, sockets).",
+    visual: { archetype: "forkJoin", params: { threads: 6 } }, related: ["omp_proc_bind"],
+  },
+  {
+    id: "omp_linear", tech: "OpenMP", category: "Data sharing", name: "linear(var:step)",
+    signature: "#pragma omp simd linear(j:1)",
+    summary: "A variable that increases by a fixed step each iteration — private but kept consistent.",
+    visual: { archetype: "dataSharing", params: { clause: "private" } }, related: ["omp_private", "omp_simd"],
+  },
+  {
+    id: "omp_scan", tech: "OpenMP", category: "Data sharing", name: "#pragma omp scan",
+    signature: "#pragma omp simd reduction(inscan,+:sum)\nfor (...) { ...; #pragma omp scan inclusive(sum); }",
+    summary: "Computes a prefix sum (running total) in parallel — the scan counterpart of reduction.",
+    visual: { archetype: "reduction", params: { threads: 4 } }, related: ["omp_reduction", "mpi_scan"],
+  },
+  {
+    id: "omp_declare_reduction", tech: "OpenMP", category: "Data sharing", name: "#pragma omp declare reduction",
+    signature: "#pragma omp declare reduction(merge : MyT : omp_out = combine(omp_out, omp_in))",
+    summary: "Defines a custom reduction operator for your own types/operations.",
+    visual: { archetype: "reduction", params: { threads: 4 } }, related: ["omp_reduction"],
+  },
+  {
+    id: "omp_taskyield", tech: "OpenMP", category: "Tasking", name: "#pragma omp taskyield",
+    signature: "#pragma omp taskyield",
+    summary: "Suggests the current task may be suspended so the thread can run another task.",
+    visual: { archetype: "tasks" }, related: ["omp_task", "omp_taskwait"],
+  },
+  {
+    id: "omp_nested", tech: "OpenMP", category: "Runtime", name: "OMP_NESTED / omp_get_level",
+    signature: "omp_set_max_active_levels(2);  int lvl = omp_get_level();",
+    summary: "Enables and inspects nested parallelism — a parallel region inside another.",
+    note: "Often better to use one level + tasks; nesting can oversubscribe the cores.",
+    visual: { archetype: "forkJoin", params: { threads: 6 } }, related: ["omp_parallel"],
+  },
+  {
+    id: "omp_get_num_procs", tech: "OpenMP", category: "Runtime", name: "omp_get_num_procs()",
+    signature: "int p = omp_get_num_procs();",
+    summary: "Returns how many processors are available to the program.",
+    visual: { archetype: "forkJoin", params: { threads: 6 } }, related: ["omp_get_max_threads"],
+  },
+
   /* ===================== MPI ===================== */
   {
     id: "mpi_init", tech: "MPI", category: "Setup", name: "MPI_Init / MPI_Finalize",
@@ -489,6 +566,81 @@ export const ENTRIES: RefEntry[] = [
     signature: "MPI_Abort(MPI_COMM_WORLD, errcode);",
     summary: "Forcibly terminates all ranks in the communicator — for unrecoverable errors.",
     visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_init"],
+  },
+
+  {
+    id: "mpi_send_modes", tech: "MPI", category: "Point-to-point", name: "MPI_Ssend / MPI_Bsend / MPI_Rsend",
+    signature: "MPI_Ssend(&x, n, type, dest, tag, comm);   // synchronous",
+    summary: "Send modes: synchronous (Ssend), buffered (Bsend), ready (Rsend) — control when send returns.",
+    note: "Ssend is great for debugging deadlocks: it can't complete until the matching recv is posted.",
+    visual: { archetype: "pointToPoint", params: { mode: "blocking" } }, related: ["mpi_send", "mpi_recv"],
+  },
+  {
+    id: "mpi_waitany", tech: "MPI", category: "Point-to-point", name: "MPI_Waitany / MPI_Waitsome",
+    signature: "MPI_Waitany(count, reqs, &index, &status);",
+    summary: "Waits for any one (or some) of several non-blocking requests — process whichever finishes first.",
+    visual: { archetype: "pointToPoint", params: { mode: "nonblocking" } }, related: ["mpi_wait", "mpi_isend"],
+  },
+  {
+    id: "mpi_win_create", tech: "MPI", category: "One-sided (RMA)", name: "MPI_Win_create / MPI_Win_fence",
+    signature: "MPI_Win_create(buf, size, .., comm, &win);\nMPI_Win_fence(0, win);  /* sync epoch */",
+    summary: "Exposes a memory window other ranks can directly read/write; fences bracket access epochs.",
+    note: "One-sided (RMA): the target rank doesn't call a matching receive.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_put", "mpi_accumulate"],
+  },
+  {
+    id: "mpi_put", tech: "MPI", category: "One-sided (RMA)", name: "MPI_Put / MPI_Get",
+    signature: "MPI_Put(&x, n, type, targetRank, disp, n, type, win);",
+    summary: "Write into (Put) or read from (Get) another rank's window directly — no matching recv on the target.",
+    visual: { archetype: "pointToPoint", params: { mode: "blocking" } }, related: ["mpi_win_create", "mpi_accumulate"],
+  },
+  {
+    id: "mpi_accumulate", tech: "MPI", category: "One-sided (RMA)", name: "MPI_Accumulate",
+    signature: "MPI_Accumulate(&x, n, type, target, disp, n, type, MPI_SUM, win);",
+    summary: "Like Put, but combines into the remote window with an op (sum, max, ...) atomically.",
+    visual: { archetype: "pointToPoint", params: { mode: "blocking" } }, related: ["mpi_put", "mpi_reduce"],
+  },
+  {
+    id: "mpi_iallreduce", tech: "MPI", category: "Collectives", name: "MPI_Iallreduce / MPI_Ireduce",
+    signature: "MPI_Iallreduce(send, recv, n, type, MPI_SUM, comm, &req);  MPI_Wait(&req, ..);",
+    summary: "Non-blocking collectives: start a global reduce, compute meanwhile, then complete with Wait.",
+    visual: { archetype: "collective", params: { op: "allreduce" } }, related: ["mpi_allreduce", "mpi_ibcast"],
+  },
+  {
+    id: "mpi_in_place", tech: "MPI", category: "Collectives", name: "MPI_IN_PLACE",
+    signature: "MPI_Allreduce(MPI_IN_PLACE, buf, n, type, MPI_SUM, comm);",
+    summary: "A sentinel that reuses the receive buffer as the send buffer — avoids a separate copy.",
+    visual: { archetype: "collective", params: { op: "allreduce" } }, related: ["mpi_allreduce", "mpi_reduce"],
+  },
+  {
+    id: "mpi_alltoallv", tech: "MPI", category: "Collectives", name: "MPI_Allgatherv / MPI_Alltoallv",
+    signature: "MPI_Alltoallv(send, scounts, sdispls, .., recv, rcounts, rdispls, .., comm);",
+    summary: "Variable-size variants of allgather/alltoall — per-rank counts and displacements.",
+    visual: { archetype: "collective", params: { op: "alltoall" } }, related: ["mpi_alltoall", "mpi_allgather"],
+  },
+  {
+    id: "mpi_op_create", tech: "MPI", category: "Collectives", name: "MPI_Op_create",
+    signature: "MPI_Op_create(myFunc, commute, &op);  MPI_Reduce(.., op, ..);",
+    summary: "Defines a custom reduction operator for MPI_Reduce/Allreduce beyond the built-ins.",
+    visual: { archetype: "collective", params: { op: "reduce" } }, related: ["mpi_reduce", "omp_declare_reduction"],
+  },
+  {
+    id: "mpi_comm_dup", tech: "MPI", category: "Communicators", name: "MPI_Comm_dup",
+    signature: "MPI_Comm_dup(MPI_COMM_WORLD, &newcomm);",
+    summary: "Clones a communicator — libraries use this to get a private channel that won't clash with yours.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_comm_split"],
+  },
+  {
+    id: "mpi_cart_shift", tech: "MPI", category: "Communicators", name: "MPI_Cart_shift",
+    signature: "MPI_Cart_shift(cart, dim, 1, &src, &dest);",
+    summary: "On a Cartesian topology, returns the neighbour ranks to exchange halos with along a dimension.",
+    visual: { archetype: "ranksMemory", params: { threads: 6, kind: "split" } }, related: ["mpi_cart_create", "mpi_sendrecv"],
+  },
+  {
+    id: "mpi_get_processor_name", tech: "MPI", category: "Setup", name: "MPI_Get_processor_name",
+    signature: "char name[MPI_MAX_PROCESSOR_NAME]; int len;\nMPI_Get_processor_name(name, &len);",
+    summary: "Returns the node/host name a rank is running on — handy for mapping ranks to machines.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_comm_rank"],
   },
 
   /* ===================== OpenACC ===================== */

@@ -43,7 +43,8 @@ Playground code) go through one async backend; **Model mode is the only offline 
   OpenMP cards → a runnable Playground example (`/playground?ex=…`), MPI cards → the measured
   Flagship experiment (`/?exp=mpiHalo`).
 - **Command Reference** (`/reference`) — a searchable, filterable library of **OpenMP, MPI & OpenACC
-  directives/commands** (~99 entries, incl. OpenMP `target` offloading + the long tail), each with a "smart" looping animation, syntax, a
+  directives/commands** (~123 entries: OpenMP 56 / MPI 40 / OpenACC 27, incl. OpenMP `target`
+  offloading, MPI one-sided RMA, atomic variants, send modes, …), each with a "smart" looping animation, syntax, a
   plain-English summary, a "good to know" note, hover-glossary `<Term>`s, related links (cross-tech
   navigation resets the filter), and a "▶ Run in the Playground" link where it maps to a runnable
   example. **Archetype-driven**: **14** reusable Canvas animations (`reference/archetypes.ts`) — incl.
