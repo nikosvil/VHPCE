@@ -89,8 +89,11 @@ export default function Lab() {
   const cfg = useRef({ playing, alpha, speed, decomp });
   useEffect(() => { cfg.current = { playing, alpha, speed, decomp }; });   // keep fresh for the rAF loop
   const iterRef = useRef(0);
+  const residRef = useRef(1);            // max |Δu| this sweep (the residual)
+  const histRef = useRef<number[]>([]);   // recent residuals, for the convergence plot
+  const convRef = useRef<HTMLCanvasElement>(null);
 
-  const reset = () => { seed(uRef.current); iterRef.current = 0; setIter(0); };
+  const reset = () => { seed(uRef.current); iterRef.current = 0; setIter(0); histRef.current = []; };
 
   useEffect(() => {
     seed(uRef.current);
@@ -113,10 +116,15 @@ export default function Lab() {
     };
     const step = (a: number) => {
       const u = uRef.current, v = vRef.current;
+      let maxd = 0;
       for (let i = 1; i < N - 1; i++) for (let j = 1; j < N - 1; j++) {
         const c = idx(i, j);
-        v[c] = u[c] + a * (u[c - N] + u[c + N] + u[c - 1] + u[c + 1] - 4 * u[c]);
+        const nv = u[c] + a * (u[c - N] + u[c + N] + u[c - 1] + u[c + 1] - 4 * u[c]);
+        const dd = nv - u[c]; const ad = dd < 0 ? -dd : dd;
+        if (ad > maxd) maxd = ad;
+        v[c] = nv;
       }
+      residRef.current = maxd;
       // boundaries held cold (Dirichlet 0); central source held hot
       for (let i = 0; i < N; i++) { v[idx(i, 0)] = 0; v[idx(i, N - 1)] = 0; v[idx(0, i)] = 0; v[idx(N - 1, i)] = 0; }
       const lo = Math.floor(N * 0.42), hi = Math.ceil(N * 0.58);
@@ -154,12 +162,37 @@ export default function Lab() {
       ctx.drawImage(off, 0, 0, w, h);
       drawOverlay(cfg.current.decomp);
     };
+    // mini log-scale convergence chart (residual vs step). Fixed internal resolution
+    // (CSS scales it) — never read the rendered size, which would feed back and blow up.
+    const cc = convRef.current;
+    const cctx = cc?.getContext("2d") ?? null;
+    const LO = -7, CW = 480, CH = 130;   // log10 floor 1e-7; internal canvas size
+    if (cc) { cc.width = CW; cc.height = CH; }
+    const drawConv = () => {
+      if (!cc || !cctx) return;
+      const hist = histRef.current;
+      cctx.clearRect(0, 0, CW, CH);
+      cctx.strokeStyle = "#121b28"; cctx.lineWidth = 1;
+      for (let e = LO; e <= 0; e++) { const y = CH - ((e - LO) / -LO) * CH; cctx.beginPath(); cctx.moveTo(0, y); cctx.lineTo(CW, y); cctx.stroke(); }
+      cctx.fillStyle = "#8a9bb4"; cctx.font = "15px ui-monospace, monospace"; cctx.textAlign = "left";
+      cctx.fillText("max |Δu| = " + residRef.current.toExponential(1), 6, 18);
+      if (hist.length < 2) return;
+      const yOf = (r: number) => { const e = Math.max(LO, Math.log10(Math.max(r, 1e-12))); return CH - ((e - LO) / -LO) * CH; };
+      const diverging = hist[hist.length - 1] > hist[0] * 1.5;
+      cctx.strokeStyle = diverging ? "#ff5d73" : "#3ddc97"; cctx.lineWidth = 2.5; cctx.beginPath();
+      hist.forEach((r, i) => { const x = (i / (hist.length - 1)) * CW; const y = yOf(r); if (i) cctx.lineTo(x, y); else cctx.moveTo(x, y); });
+      cctx.stroke();
+      cctx.textAlign = "right"; cctx.fillStyle = diverging ? "#ff5d73" : "#5e6e88";
+      cctx.fillText(diverging ? "diverging!" : "converging", CW - 6, 18);
+    };
     const loop = () => {
       if (cfg.current.playing) {
         for (let s = 0; s < cfg.current.speed; s++) { step(cfg.current.alpha); iterRef.current++; }
+        const hist = histRef.current; hist.push(residRef.current); if (hist.length > 180) hist.shift();
         if (++frame % 6 === 0) setIter(iterRef.current);
       }
       draw();
+      drawConv();
       raf = requestAnimationFrame(loop);
     };
     resize();
@@ -204,6 +237,11 @@ export default function Lab() {
               ))}
             </div>
             <div className="fixhint">Overlay how the grid is split — and where <Glossed>{"the halo cells that drive MPI communication"}</Glossed> live.</div>
+          </div>
+          <div className="ctrl">
+            <label>Convergence (max |Δu| per step, log)</label>
+            <canvas className="conv-canvas" style={{ width: "100%", height: 96 }} ref={convRef} />
+            <div className="fixhint">The residual falls as it nears steady state — and <b>diverges</b> if you push α past 0.25.</div>
           </div>
         </section>
 
