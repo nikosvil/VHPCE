@@ -75,6 +75,7 @@ export const EXPERIMENTS = [
   { id: "mpiHalo", name: "MPI Halo Exchange", scene: "ranks · halo exchange · comm wall" },
   { id: "cuda", name: "GPU Occupancy", scene: "warps · SMs · register pressure" },
   { id: "cudaCoalesce", name: "GPU Coalescing", scene: "warp · memory transactions" },
+  { id: "cudaDivergence", name: "GPU Divergence", scene: "warp · serialized branch paths" },
 ];
 
 export const GPU_SWEEP = [1, 2, 4, 8, 16, 32];
@@ -262,6 +263,22 @@ export const Models: Record<string, (p: any) => ExperimentResult> = {
       ],
     } as ExperimentResult;
   },
+  cudaDivergence(params) {
+    const sweep: SweepPoint[] = GPU_SWEEP.map((D) => ({ x: D, time: D, speedup: 1 / D, efficiency: 1 / D }));
+    const cur = sweep.find((s) => s.x === params.paths) || sweep[0];
+    const slowdown = 1 / cur.efficiency, active = cur.efficiency * 100;
+    return {
+      experimentId: "cudaDivergence", source: "model", referenceMachine: REF.id, params,
+      sweep, current: cur, xLabel: "divergent branch paths taken within the warp", util: cur.efficiency, factor: slowdown,
+      metrics: [
+        { k: "Divergent paths", v: cur.x + (cur.x === 1 ? " (uniform)" : ""), tone: cur.x === 1 ? "good" : cur.x <= 4 ? "warn" : "bad" },
+        { k: "Warp slowdown", v: fmt(slowdown, 1) + "×", tone: slowdown < 2 ? "good" : slowdown < 8 ? "warn" : "bad" },
+        { k: "Active lanes (avg)", v: fmt(active, 0) + "%", tone: active > 50 ? "good" : active > 20 ? "warn" : "bad" },
+        { k: "Lanes idled", v: fmt(100 - active, 0) + "%", tone: 100 - active < 30 ? "good" : "bad" },
+        { k: "Best", v: "uniform (1 path)", tone: "accent" },
+      ],
+    } as ExperimentResult;
+  },
 };
 
 /* ===================== Producer B — measured adapters ===================== */
@@ -409,6 +426,26 @@ export const Measured: Record<string, (p: any, data: RunnerData) => ExperimentRe
         { k: "vs coalesced", v: fmt(eff * 100, 0) + "%", tone: eff > 0.6 ? "good" : eff > 0.3 ? "warn" : "bad" },
         { k: "Bandwidth wasted", v: fmt((1 - eff) * 100, 0) + "%", tone: 1 - eff < 0.3 ? "good" : "bad" },
         { k: "Peak (meas.)", v: fmt(peak, 0) + " GB/s", tone: "accent" },
+      ],
+    } as ExperimentResult;
+  },
+  cudaDivergence(params, data) {
+    const meta = data as RunnerData & { sm?: string };
+    const pts = data.points;
+    const t1 = pts[0]?.ms || 1;
+    const sweep: SweepPoint[] = pts.map((pt) => ({ x: pt.p, time: pt.ms, speedup: t1 / pt.ms, efficiency: t1 / pt.ms }));
+    const cur = sweep.find((s) => s.x === params.paths) || sweep[0];
+    const slowdown = 1 / Math.max(cur.efficiency, 1e-6), active = cur.efficiency * 100;
+    const curPt = pts[sweep.indexOf(cur)] ?? pts[0];
+    return {
+      experimentId: "cudaDivergence", source: "measured", referenceMachine: REF.id, params,
+      sweep, current: cur, xLabel: "divergent branch paths taken within the warp", util: cur.efficiency, factor: slowdown, smName: meta.sm,
+      metrics: [
+        { k: "Divergent paths", v: cur.x + (cur.x === 1 ? " (uniform)" : ""), tone: cur.x === 1 ? "good" : cur.x <= 4 ? "warn" : "bad" },
+        { k: "Warp slowdown", v: fmt(slowdown, 1) + "×", tone: slowdown < 2 ? "good" : slowdown < 8 ? "warn" : "bad" },
+        { k: "Kernel time", v: fmt(curPt?.ms ?? 0, 2) + " ms", tone: "" },
+        { k: "Active lanes (avg)", v: fmt(active, 0) + "%", tone: active > 50 ? "good" : active > 20 ? "warn" : "bad" },
+        { k: "Lanes idled", v: fmt(100 - active, 0) + "%", tone: 100 - active < 30 ? "good" : "bad" },
       ],
     } as ExperimentResult;
   },

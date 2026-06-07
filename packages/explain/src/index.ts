@@ -135,6 +135,24 @@ export const Explain: Record<string, ExplainFn> = {
       exp: `Drop the stride back toward 1 and the achieved bandwidth climbs back to the coalesced peak.`,
     };
   },
+  cudaDivergence(r) {
+    const D = r.current.x, eff = (r.current.efficiency ?? 0) * 100, slow = r.factor ?? 1 / (r.current.efficiency || 1);
+    if (D === 1)
+      return {
+        sev: "info",
+        what: `Uniform control flow (<b>1 path</b>): all 32 lanes of the warp take the same branch, so they execute together in a single pass — full SIMT throughput.`,
+        why: `A warp shares one program counter. When every lane agrees on the branch, there's nothing to serialize and all 32 lanes do useful work each cycle.`,
+        how: `Already optimal. Increase the <b>divergent paths</b> to watch the warp split into serial passes.`,
+        exp: `Each extra path the warp must take adds another serialized pass — runtime climbs roughly linearly.`,
+      };
+    return {
+      sev: eff < 30 ? "critical" : "warn",
+      what: `<b>${D} divergent paths</b>: the warp runs ${D} passes one after another (≈<b>${fmt(slow, 1)}× slower</b>), with only ~${fmt(eff, 0)}% of lanes active per pass.`,
+      why: `All 32 lanes share one program counter. When lanes take different branches, the hardware masks off the inactive ones and replays the warp once per path — the idle lanes burn cycles doing nothing.`,
+      how: `<b>Make branches warp-uniform.</b> Sort/bin data so a whole warp takes the same path, hoist the condition out of the warp, or replace small <code>if/else</code> with branchless arithmetic (<code>select</code>/predication).`,
+      exp: `Collapse the paths back toward 1 and the warp re-converges — the serialized passes disappear and throughput recovers.`,
+    };
+  },
 };
 
 export const ExplainMeasured: Record<string, ExplainFn> = {
@@ -258,6 +276,25 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `Each warp now spans ${stride} cache lines; the controller still transfers full 128-byte lines but the kernel uses a fraction of each. The wasted bytes are real DRAM traffic you paid for.`,
       how: `Reorganise so the innermost (unit-stride) index maps to <code>threadIdx.x</code> — Structure-of-Arrays layout, or transpose before the kernel.`,
       exp: `Set the stride back to 1 and watch the measured bandwidth recover to the coalesced peak on this exact card.`,
+    };
+  },
+  cudaDivergence(r) {
+    const D = r.current.x, eff = (r.current.efficiency ?? 0) * 100, slow = r.factor ?? 1 / (r.current.efficiency || 1);
+    const dev = r.smName || "the GPU";
+    if (D === 1)
+      return {
+        sev: "info",
+        what: `Measured on ${dev}: <b>uniform</b> control flow runs the warp in one pass at full throughput (baseline ${fmt(r.current.time, 2)} ms).`,
+        why: `Every lane takes the same branch, so the warp never replays — all 32 lanes do useful work together. This is the convergent baseline.`,
+        how: `This is the target. Increase the <b>divergent paths</b> to measure the serialization penalty on the same card.`,
+        exp: `Runtime grows almost linearly with the number of paths the warp is forced to take.`,
+      };
+    return {
+      sev: eff < 30 ? "critical" : "warn",
+      what: `Measured on ${dev}: <b>${D} divergent paths</b> run <b>${fmt(slow, 1)}× slower</b> than uniform — only ~${fmt(eff, 0)}% of lanes active per pass.`,
+      why: `The warp shares one program counter, so the hardware serializes the ${D} branch paths into ${D} masked passes. The measured slowdown is the cost of those idle lane-cycles on real silicon.`,
+      how: `Restructure so a whole warp takes one branch (sort/bin by condition), or go branchless with predication so there's nothing to serialize.`,
+      exp: `Reduce the paths back toward 1 and the measured time drops as the warp re-converges.`,
     };
   },
 };

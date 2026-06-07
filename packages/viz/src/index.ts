@@ -388,4 +388,53 @@ const coalesce: SceneFn = (ctx, VW, VH, now, res) => {
   );
 };
 
-export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo, cuda, cudaCoalesce: coalesce };
+// Warp divergence: 32 lanes share one program counter. With D distinct branch paths the warp
+// replays D times — each pass only the lanes on that path are active, the rest idle. The animation
+// cycles the active pass; the serial timeline below shows runtime = the sum of all D passes.
+const divergence: SceneFn = (ctx, VW, VH, now, res) => {
+  const D = Math.max(1, Math.round(res.current.x));
+  const eff = res.current.efficiency ?? 1 / D;
+  const col = eff > 0.6 ? C.good : eff > 0.3 ? C.warn : C.bad;
+  const LANES = 32, pad = 24;
+  const pass = Math.floor(now / 750) % D;   // which branch path is executing now
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`one warp · ${D} branch path${D > 1 ? "s" : ""} → ${D} serial pass${D > 1 ? "es" : ""} — lanes off the active path idle`, VW / 2, 18);
+
+  // lanes row, coloured by whether this lane's branch is the one currently executing
+  const ly = 36, lh = 42, ww = VW - pad * 2, cw = ww / LANES;
+  let activeCount = 0;
+  for (let t = 0; t < LANES; t++) {
+    const active = (t % D) === pass; if (active) activeCount++;
+    const x = pad + t * cw; rr(ctx, x + 1, ly, cw - 2, lh, 3);
+    if (active) {
+      ctx.fillStyle = col; ctx.globalAlpha = 0.45 + 0.4 * Math.abs(Math.sin(now / 300 + t)); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.lineWidth = 1.2; ctx.strokeStyle = col; ctx.stroke();
+    } else {
+      ctx.fillStyle = "#101a28"; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = "#1c2940"; ctx.stroke();
+      ctx.strokeStyle = "#22324a"; ctx.beginPath(); ctx.moveTo(x + 3, ly + lh - 3); ctx.lineTo(x + cw - 3, ly + 3); ctx.stroke();
+    }
+  }
+  ctx.fillStyle = C.dim; ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "left"; ctx.fillText("warp lanes t0…t31", pad, ly - 4);
+
+  // serialized passes timeline
+  const shown = Math.min(D, 16), ty = ly + lh + 24, th = 20, segW = ww / shown;
+  for (let pIx = 0; pIx < shown; pIx++) {
+    const sx = pad + pIx * segW; rr(ctx, sx + 1, ty, segW - 2, th, 4);
+    if (pIx === pass) { ctx.fillStyle = col; ctx.globalAlpha = 0.8; ctx.fill(); ctx.globalAlpha = 1; }
+    else if (pIx < pass) { ctx.fillStyle = "rgba(120,140,170,.28)"; ctx.fill(); }
+    else { ctx.fillStyle = "#0a0f18"; ctx.fill(); }
+    ctx.lineWidth = 1; ctx.strokeStyle = "#22324a"; ctx.stroke();
+  }
+  ctx.fillStyle = C.dim; ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "left";
+  ctx.fillText(`serialized passes — warp time = sum of all ${D} path${D > 1 ? "s" : ""}` + (D > 16 ? " (showing 16)" : ""), pad, ty + th + 13);
+
+  ctx.fillStyle = col; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    D === 1 ? "uniform — all 32 lanes run together · full throughput"
+            : `${activeCount}/32 lanes active this pass · ${Math.round((1 - eff) * 100)}% of lane-cycles idle · ${fmt(1 / eff, 1)}× slower`,
+    VW / 2, ty + th + 32,
+  );
+};
+
+export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo, cuda, cudaCoalesce: coalesce, cudaDivergence: divergence };
