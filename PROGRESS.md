@@ -63,7 +63,8 @@ Playground code) go through one async backend; **Model mode is the only offline 
   OpenMP shared rows, MPI blocks + **halo rings** (links to the MPI Halo Exchange experiment), GPU
   tiles. Picking a model also swaps in the **actual stencil code** for it (serial → `omp parallel for`
   → `MPI_Sendrecv` halo exchange → CUDA kernel) with links to the matching Reference entry + Flagship
-  experiment — the direct tie from the picture to real OpenMP/MPI/GPU code.
+  experiment — the direct tie from the picture to real OpenMP/MPI/GPU code. A live **convergence
+  plot** (log-scale max |Δu| per step) shows the solver converging — and **diverging** (red) when α>0.25.
 - **Flagship** (`/`) — five experiments (false sharing, synchronization, bandwidth saturation,
   load imbalance, **MPI halo exchange**), each with: model + **measured** data behind a
   **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a **2D | 3D**
