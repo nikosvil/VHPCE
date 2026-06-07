@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { learnScenes, type LearnState } from "./learn/scenes";
+import Glossed from "./Glossed";
 
 type Control =
   | { kind: "none" }
@@ -255,7 +256,7 @@ export default function Learn() {
 
         <section className="card">
           <h2><span>The idea</span></h2>
-          <p className="learn-blurb">{concept.blurb}</p>
+          <p className="learn-blurb"><Glossed>{concept.blurb}</Glossed></p>
           <div className="code">
             {codeLines.map((ln, i) => (
               <div key={i} className={"ln" + (concept.highlight.includes(i) ? " hl" : "")}>{ln || " "}</div>

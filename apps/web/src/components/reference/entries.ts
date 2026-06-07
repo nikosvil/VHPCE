@@ -439,6 +439,58 @@ export const ENTRIES: RefEntry[] = [
     visual: { archetype: "accData", params: { clause: "copy" } }, related: ["omp_map", "acc_default_present"],
   },
 
+  {
+    id: "omp_atomic_memorder", tech: "OpenMP", category: "Synchronization", name: "atomic seq_cst / acq_rel / relaxed",
+    signature: "#pragma omp atomic update seq_cst\nx += 1;",
+    summary: "Memory-ordering clauses on atomic that control how the update is ordered against other memory ops.",
+    note: "relaxed is fastest (atomicity only); seq_cst is the safe default for ordering.",
+    visual: { archetype: "criticalAtomic", params: { kind: "atomic" } }, related: ["omp_atomic", "omp_flush"],
+  },
+  {
+    id: "omp_scope", tech: "OpenMP", category: "Data sharing", name: "#pragma omp scope",
+    signature: "#pragma omp scope reduction(+:sum)\n{ ...; }",
+    summary: "A structured block (5.1+) that can carry reductions/privates without being a loop.",
+    visual: { archetype: "reduction", params: { threads: 4 } }, related: ["omp_reduction", "omp_single"],
+  },
+  {
+    id: "omp_interop", tech: "OpenMP", category: "Offloading (target)", name: "#pragma omp interop",
+    signature: "#pragma omp interop init(targetsync: obj)",
+    summary: "Interoperates with native device runtimes/streams (e.g. CUDA) — bridges OpenMP and GPU libraries.",
+    visual: { archetype: "offload", params: { kind: "routine" } }, related: ["omp_target", "acc_host_data"],
+  },
+  {
+    id: "omp_metadirective", tech: "OpenMP", category: "Advanced", name: "#pragma omp metadirective",
+    signature: "#pragma omp metadirective when(device={arch(nvptx)}: target teams) default(parallel for)",
+    summary: "Chooses which directive to apply based on context (architecture, device, …) at compile time.",
+    note: "Write one loop that compiles to CPU or GPU directives depending on the target.",
+    visual: { archetype: "worksharing", params: { kind: "for", threads: 4 } }, related: ["omp_declare_variant", "omp_target"],
+  },
+  {
+    id: "omp_declare_variant", tech: "OpenMP", category: "Advanced", name: "#pragma omp declare variant",
+    signature: "#pragma omp declare variant(fast_f) match(construct={target})\ndouble f(double x);",
+    summary: "Provides a specialized version of a function the compiler swaps in for matching contexts.",
+    visual: { archetype: "worksharing", params: { kind: "for", threads: 4 } }, related: ["omp_metadirective", "omp_routine"],
+  },
+  {
+    id: "omp_get_wtick", tech: "OpenMP", category: "Runtime", name: "omp_get_wtick()",
+    signature: "double tick = omp_get_wtick();",
+    summary: "The timer resolution (seconds per tick) of omp_get_wtime.",
+    visual: { archetype: "forkJoin", params: { threads: 6 } }, related: ["omp_get_wtime"],
+  },
+  {
+    id: "omp_stacksize", tech: "OpenMP", category: "Runtime", name: "OMP_STACKSIZE",
+    signature: "export OMP_STACKSIZE=16M",
+    summary: "Sets the per-thread stack size — bump it if deep recursion or big locals overflow.",
+    visual: { archetype: "forkJoin", params: { threads: 6 } }, related: ["omp_wait_policy"],
+  },
+  {
+    id: "omp_wait_policy", tech: "OpenMP", category: "Runtime", name: "OMP_WAIT_POLICY",
+    signature: "export OMP_WAIT_POLICY=active   # or passive",
+    summary: "Whether idle threads spin (active: low latency, burns a core) or sleep (passive: yields).",
+    note: "active helps tight compute; passive is friendlier when oversubscribing or sharing the node.",
+    visual: { archetype: "forkJoin", params: { threads: 6 } }, related: ["omp_proc_bind"],
+  },
+
   /* ===================== MPI ===================== */
   {
     id: "mpi_init", tech: "MPI", category: "Setup", name: "MPI_Init / MPI_Finalize",
@@ -751,6 +803,71 @@ export const ENTRIES: RefEntry[] = [
     signature: "MPI_File_write_at_all(fh, offset, buf, n, MPI_INT, &status);",
     summary: "Each rank writes (or reads) its slice of a shared file at a given offset, collectively.",
     visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_file_open"],
+  },
+
+  {
+    id: "mpi_sendrecv_replace", tech: "MPI", category: "Point-to-point", name: "MPI_Sendrecv_replace",
+    signature: "MPI_Sendrecv_replace(buf, n, type, dest, stag, src, rtag, comm, &st);",
+    summary: "Sends and receives using one buffer — the received data overwrites the sent data in place.",
+    note: "Handy for cyclic shifts (rotate data around a ring of ranks).",
+    visual: { archetype: "pointToPoint", params: { mode: "blocking" } }, related: ["mpi_sendrecv", "mpi_cart_shift"],
+  },
+  {
+    id: "mpi_testall", tech: "MPI", category: "Point-to-point", name: "MPI_Testall / MPI_Testany",
+    signature: "int done; MPI_Testall(n, reqs, &done, stats);",
+    summary: "Non-blocking poll over many requests — returns whether all (or any) have completed yet.",
+    visual: { archetype: "pointToPoint", params: { mode: "nonblocking" } }, related: ["mpi_test", "mpi_waitany"],
+  },
+  {
+    id: "mpi_cancel", tech: "MPI", category: "Point-to-point", name: "MPI_Cancel / MPI_Request_free",
+    signature: "MPI_Cancel(&req);  MPI_Request_free(&req);",
+    summary: "Attempts to cancel a pending non-blocking operation and release its request handle.",
+    visual: { archetype: "pointToPoint", params: { mode: "nonblocking" } }, related: ["mpi_isend", "mpi_wait"],
+  },
+  {
+    id: "mpi_reduce_local", tech: "MPI", category: "Collectives", name: "MPI_Reduce_local",
+    signature: "MPI_Reduce_local(inbuf, inoutbuf, n, type, MPI_SUM);",
+    summary: "Applies a reduction op to two local buffers — no communication; a building block for custom collectives.",
+    visual: { archetype: "collective", params: { op: "reduce" } }, related: ["mpi_reduce", "mpi_op_create"],
+  },
+  {
+    id: "mpi_graph", tech: "MPI", category: "Communicators", name: "MPI_Dist_graph_create",
+    signature: "MPI_Dist_graph_create_adjacent(comm, indeg, srcs, .., outdeg, dests, .., info, reorder, &g);",
+    summary: "A general graph topology — arbitrary neighbour relations (beyond a Cartesian grid).",
+    note: "Pairs with the neighborhood collectives for irregular meshes.",
+    visual: { archetype: "ranksMemory", params: { threads: 6, kind: "split" } }, related: ["mpi_cart_create", "mpi_neighbor"],
+  },
+  {
+    id: "mpi_type_commit", tech: "MPI", category: "Communicators", name: "MPI_Type_commit / MPI_Type_size",
+    signature: "MPI_Type_commit(&t);  int sz; MPI_Type_size(t, &sz);",
+    summary: "Finalizes a derived datatype so it can be used in communication; query its byte size.",
+    visual: { archetype: "pointToPoint", params: { mode: "blocking" } }, related: ["mpi_type_vector", "mpi_type_struct"],
+  },
+  {
+    id: "mpi_win_shared", tech: "MPI", category: "One-sided (RMA)", name: "MPI_Win_allocate_shared",
+    signature: "MPI_Win_allocate_shared(size, disp, info, shmComm, &ptr, &win);",
+    summary: "Allocates a window in true shared memory across ranks on the same node — direct load/store, no copies.",
+    note: "MPI+shared-memory: ranks on one node can share data like threads while staying separate processes.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_win_create", "mpi_put"],
+  },
+  {
+    id: "mpi_comm_spawn", tech: "MPI", category: "Dynamic processes", name: "MPI_Comm_spawn",
+    signature: "MPI_Comm_spawn(\"worker\", argv, count, info, root, comm, &intercomm, errs);",
+    summary: "Launches new MPI processes at run time and connects them via an inter-communicator.",
+    note: "Most HPC jobs use a fixed process count; spawning suits master/worker or elastic workloads.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_init", "mpi_comm_dup"],
+  },
+  {
+    id: "mpi_info", tech: "MPI", category: "Setup", name: "MPI_Info_create / MPI_Info_set",
+    signature: "MPI_Info info; MPI_Info_create(&info);\nMPI_Info_set(info, \"key\", \"value\");",
+    summary: "Key/value hints passed to MPI (I/O striping, RMA, spawn, ...) to guide the implementation.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_file_open", "mpi_comm_spawn"],
+  },
+  {
+    id: "mpi_wtick", tech: "MPI", category: "Setup", name: "MPI_Wtick",
+    signature: "double res = MPI_Wtick();",
+    summary: "The resolution (seconds per tick) of the MPI_Wtime clock.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } }, related: ["mpi_wtime"],
   },
 
   /* ===================== OpenACC ===================== */

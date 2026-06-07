@@ -6,6 +6,7 @@ import { archetypes } from "./reference/archetypes";
 import { ENTRIES, TECHS, type RefEntry, type Tech } from "./reference/entries";
 import { GLOSSARY_KEYS } from "./glossary";
 import Term from "./Term";
+import Glossed from "./Glossed";
 
 type Filter = "All" | Tech;
 
@@ -129,12 +130,12 @@ export default function Reference() {
             <span className="ref-cat-tag">{sel.category}</span>
           </div>
           <pre className="code ref-sig">{sel.signature.split("\n").map((ln, i) => <div className="ln" key={i}>{ln || " "}</div>)}</pre>
-          <p className="ref-summary">{sel.summary}</p>
+          <p className="ref-summary"><Glossed>{sel.summary}</Glossed></p>
           <div className="ref-canvas"><canvas className="viz" ref={canvasRef} /></div>
           {sel.note && (
             <div className="eb how" style={{ marginTop: 12 }}>
               <div className="t">Good to know</div>
-              <div className="body">{sel.note}</div>
+              <div className="body"><Glossed>{sel.note}</Glossed></div>
             </div>
           )}
           <div className="ref-actions">
