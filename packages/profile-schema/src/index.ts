@@ -7,7 +7,7 @@ export type Source = "model" | "measured";
 export type Tone = "good" | "warn" | "bad" | "accent" | "";
 
 export interface SweepPoint {
-  /** degree of parallelism (threads/ranks) */
+  /** degree of parallelism (threads/ranks) or, for GPU, threads-per-block */
   x: number;
   /** wall time in ms */
   time: number;
@@ -15,6 +15,8 @@ export interface SweepPoint {
   speedup: number;
   /** speedup / x */
   efficiency: number;
+  /** GPU achieved occupancy (0..1), populated by the cuda experiment */
+  occ?: number;
 }
 
 export interface Metric {
@@ -44,6 +46,8 @@ export interface ExperimentResult {
   sweep: SweepPoint[];
   current: SweepPoint;
   metrics: Metric[];
+  /** x-axis unit for the sweep — "threads" (OpenMP), "ranks" (MPI), or "block" (GPU). Defaults to threads. */
+  xUnits?: "threads" | "ranks" | "block";
 
   // experiment-specific extras (optional; populated per experiment)
   peak?: SweepPoint;
@@ -61,6 +65,14 @@ export interface ExperimentResult {
   satThreads?: number;
   factor?: number;
   idlePct?: number;
+
+  // GPU occupancy (cuda) extras
+  occupancy?: number;       // achieved occupancy (0..1) at the current block size
+  limiter?: string;         // what caps occupancy: "registers" | "block size" | "warps/SM" | "none"
+  regsPerThread?: number;
+  optimalBlock?: number;    // block size with the best occupancy in the sweep
+  smName?: string;          // device name (measured)
+  gflops?: number;
 }
 
 /** Runner payload shape (Producer B). */
@@ -69,6 +81,7 @@ export interface RunnerPoint {
   ms: number;
   gbps?: number;
   gflops?: number;
+  occ?: number;   // GPU achieved occupancy (0..1), from the cuda runner
 }
 export interface RunnerData {
   exp: string;

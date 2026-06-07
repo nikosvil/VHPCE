@@ -80,10 +80,16 @@ at `/playground` compiles and benchmarks any OpenMP C in a **locked-down Docker 
 (`infra/docker/runner.Dockerfile`: `--network none --cap-drop ALL --read-only`, memory/PID/time
 limits, source via stdin) through the runner's `/run-code` endpoint, and renders the measured
 scaling + a generic reading. The playground also offers opt-in **cachegrind** cache-miss profiling (D1/LLd miss rates +
-instruction count, via `--cache-sim=yes` in the container). The remaining piece — the
-**FastAPI gateway + Redis/Arq job queue** — is **deferred to the cloud/multi-user phase (P5)**
-(user decision): the serialized stdlib runner is correct and sufficient for local single-user
-use, and a queue mainly earns its keep under concurrent load. **P2 is complete for local use.**
+instruction count, via `--cache-sim=yes` in the container). **P2 is complete for local use.**
+
+**Cloud Phase (2026-06-04) — landed.** The deferred **FastAPI gateway + Redis + Arq job queue**
+is built (`services/api` + `infra/docker/compose.yml`). Per a user decision the backend is
+**unified**: the stdlib runner is retired and *both* producers — the flagship's fixed kernels
+(`vhpce-bench`) and arbitrary Playground code (`vhpce-runner`) — now `POST /api/jobs` and poll
+`GET /api/jobs/{id}`. The Arq worker runs `max_jobs=1` (one container at a time → clean timing) and
+mounts the host Docker socket to spawn the sandbox siblings; bench results are cached in Redis.
+This is the cloud-scale groundwork from Phase 5, brought forward — true multi-user autoscaling
+(K8s Jobs) and PMU counters remain the bare-metal/cloud upgrade.
 
 ---
 
@@ -94,6 +100,17 @@ animator** (halo exchange, reductions, broadcasts, all-to-all); latency-vs-bandw
 **DoD:** a halo-exchange example animates real rank communication and explains comm-dominated
 scaling.
 
+**Status (2026-06-04) — landed.** A fifth flagship experiment, **MPI Halo Exchange**: a 1-D Jacobi
+stencil with ring halo exchange, run across a **rank sweep** through the gateway's `{kind:"mpi"}`
+job → `vhpce-mpi` (OpenMPI, `mpirun --oversubscribe`). The teaching contrast is **strong vs weak
+scaling** — strong (fixed grid) saturates as the comm fraction grows; weak (grid ∝ ranks) holds
+efficiency near ideal. The scaling axis generalizes to **ranks** (`ExperimentResult.xUnits`) and
+`buildResult` gained weak-scaling (scaled-speedup) metrics; a 2D Canvas + 3D R3F scene animate the
+halo packets. The **model** shows the vivid comm-dominated curve; **measured** shows this single
+node's shared-memory reality (gentler wall) — the seam carries both, proving a *second execution
+model* end-to-end. (Score-P/mpiP trace parsing and the broadcast/all-to-all patterns remain future
+work; comm fraction is currently derived from the scaling curve / model.)
+
 ## Phase 4 — GPU / CUDA (local on the RTX 5060)
 
 Deliverables: CUDA toolkit in WSL2 (GPU already visible via passthrough); Nsight Systems parsing
@@ -101,6 +118,17 @@ Deliverables: CUDA toolkit in WSL2 (GPU already visible via passthrough); Nsight
 divergence, coalescing, shared memory, register pressure); PCIe transfer view.
 **DoD:** a CUDA kernel run on the RTX 5060 reports occupancy with an explanation of the limiter
 (e.g., register pressure) and a suggested fix.
+
+**Status (2026-06-04) — landed.** A sixth flagship experiment, **GPU Occupancy**: a CUDA kernel swept
+across **threads/block (32→1024)** on the **RTX 5060** (sm_120) through the gateway's `{kind:"cuda"}`
+job → `docker run --gpus all vhpce-cuda` (nvcc, sm_120 native with a `compute_90` PTX-JIT fallback).
+The teaching contrast is **register pressure**: the heavy kernel (104 registers/thread, measured) is
+**register-limited** (~33% occupancy; large blocks can't even launch — "too many resources"), while
+the light kernel (10 regs) reaches ~100%. The DoD is met — it reports achieved occupancy, names the
+**limiter** (registers), and suggests the fix (cut registers / `__launch_bounds__` / pick the
+occupancy-optimal block). **Occupancy is measured for real** via the CUDA Occupancy API on the device
+(Nsight Compute on WSL2 remains future work); the GPU-specific x-domain gets a dedicated
+`drawOccupancy` chart. Coalescing / divergence / shared-memory and the PCIe view remain future work.
 
 ## Phase 5 — Domains, gamification, classrooms, cloud scale
 

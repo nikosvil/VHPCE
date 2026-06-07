@@ -148,3 +148,68 @@ footer.note code { font-family: var(--mono); color: var(--muted); background: #0
 .pg-cc { background: #1a0e12; border: 1px solid rgba(255,93,115,.4); border-radius: 10px; padding: 10px 12px; }
 .pg-cc-title { color: var(--bad); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
 .pg-cc pre { margin: 0; font-family: var(--mono); font-size: 11.5px; color: #ffb9c2; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+
+/* ---- /learn (beginner concept animations) ---- */
+.tabgroup { font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--dim); align-self: center; margin: 0 4px 0 6px; }
+.tabgroup:first-child { margin-left: 0; }
+.learn-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 14px; align-items: start; }
+@media (max-width: 1080px) { .learn-grid { grid-template-columns: 1fr; } }
+.learn-canvas { position: relative; min-height: 360px; display: flex; flex-direction: column; }
+.learn-canvas canvas.viz { min-height: 300px; }
+.step-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.step-btn { border: 1px solid var(--line); background: #0c1320; color: var(--muted); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 12.5px; font-family: var(--mono); transition: .12s; }
+.step-btn:hover { color: var(--text); border-color: #2c3a50; }
+.step-btn.play { background: var(--accent); color: #04121a; border-color: transparent; font-weight: 700; }
+.learn-slider { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.learn-slider b { color: var(--text); font-family: var(--mono); }
+.learn-slider input[type=range] { width: 130px; }
+.learn-blurb { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0 0 12px; }
+.code { background: #0a0f18; border: 1px solid var(--line); border-radius: 10px; padding: 12px 0; overflow: auto; }
+.code .ln { padding: 0 14px; white-space: pre; font-family: var(--mono); font-size: 12.5px; line-height: 1.65; color: #cdd7e5; }
+.code .ln.hl { background: rgba(76,201,240,.12); border-left: 3px solid var(--accent); padding-left: 11px; color: #fff; }
+.terms { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+@media (max-width: 760px) { .terms { grid-template-columns: 1fr; } }
+.terms b { color: var(--text); }
+.learn-link { display: inline-block; margin-top: 12px; font-size: 12.5px; font-weight: 600; color: var(--accent); }
+.learn-link:hover { text-decoration: underline; }
+
+/* ---- Playground worked-examples row ---- */
+.pg-examples { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.pg-examples-label { font-size: 11.5px; color: var(--dim); margin-right: 2px; }
+.pg-ex-btn { border: 1px solid var(--line); background: #0c1320; color: var(--muted); border-radius: 999px; padding: 5px 11px; font-size: 12px; font-family: var(--sans); cursor: pointer; transition: .12s; }
+.pg-ex-btn:hover { color: var(--text); border-color: #2c3a50; }
+
+/* ---- /reference (command library) ---- */
+.ref-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.ref-search { flex: 1; min-width: 220px; background: #0c1320; border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 9px 14px; font-size: 13px; font-family: var(--sans); outline: none; }
+.ref-search:focus { border-color: var(--accent); }
+.ref-grid { display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }
+@media (max-width: 900px) { .ref-grid { grid-template-columns: 1fr; } }
+.ref-list { max-height: 72vh; overflow: auto; padding: 10px; }
+.ref-cat { margin-bottom: 10px; }
+.ref-cat-h { font-size: 10px; text-transform: uppercase; letter-spacing: 1.1px; color: var(--dim); margin: 6px 6px 6px; font-weight: 600; }
+.ref-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left; border: 1px solid transparent; background: transparent; color: var(--muted); padding: 7px 9px; border-radius: 8px; cursor: pointer; font-size: 12.5px; font-family: var(--mono); transition: .12s; }
+.ref-item:hover { color: var(--text); background: #0c1320; }
+.ref-item.sel { color: var(--text); background: #0c1320; border-color: #2c3a50; }
+.ref-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-tech { font-size: 9.5px; font-family: var(--mono); padding: 1px 6px; border-radius: 5px; flex: none; }
+.ref-tech.openmp { background: rgba(76,201,240,.16); color: var(--accent); }
+.ref-tech.mpi { background: rgba(179,136,255,.16); color: var(--accent2); }
+.ref-tech.openacc { background: rgba(61,220,151,.16); color: var(--good); }
+.ref-detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.ref-cat-tag { font-size: 11px; color: var(--dim); }
+.ref-sig { margin: 0 0 12px; }
+.ref-summary { font-size: 13.5px; color: var(--text); line-height: 1.55; margin: 0 0 12px; }
+.ref-canvas { position: relative; }
+.ref-canvas canvas.viz { min-height: 300px; }
+.ref-actions { margin-top: 10px; }
+.ref-terms, .ref-related { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.ref-terms-label { font-size: 11px; color: var(--dim); }
+.ref-chip { border: 1px solid var(--line); background: #0c1320; color: var(--muted); border-radius: 999px; padding: 4px 10px; font-size: 11.5px; font-family: var(--mono); cursor: pointer; transition: .12s; }
+.ref-chip:hover { color: var(--text); border-color: #2c3a50; }
+
+/* inline glossary term */
+.term { position: relative; border-bottom: 1px dotted var(--accent); cursor: help; color: inherit; }
+.term-pop { visibility: hidden; opacity: 0; position: absolute; left: 0; bottom: 130%; z-index: 20; width: 240px; background: #0c1320; border: 1px solid #2c3a50; border-radius: 8px; padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: var(--muted); font-family: var(--sans); box-shadow: 0 8px 24px rgba(0,0,0,.5); transition: opacity .12s; pointer-events: none; }
+.term:hover .term-pop, .term:focus .term-pop { visibility: visible; opacity: 1; }
+.ref-terms .term { margin-right: 4px; font-family: var(--mono); font-size: 12px; }

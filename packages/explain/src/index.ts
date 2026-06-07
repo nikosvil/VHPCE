@@ -81,6 +81,42 @@ export const Explain: Record<string, ExplainFn> = {
       exp: `Imbalance factor → ~1.05, idle time → near 0, speedup approaches ${c.x}×.`,
     };
   },
+  mpiHalo(r) {
+    const c = r.current, weak = r.params.mode === "weak", commPct = r.idlePct ?? 0, peak = r.peak!;
+    if (weak)
+      return {
+        sev: c.efficiency > 0.7 ? "info" : "warn",
+        what: `Weak scaling: as the grid grows with the ranks, scaled speedup reaches <b>${fmt(c.speedup, 1)}×</b> on ${c.x} ranks at <b>${fmt(c.efficiency * 100, 0)}% efficiency</b> — close to ideal.`,
+        why: `Every rank keeps the <b>same local work</b>, so compute time is constant; only the halo exchange grows (~log p), a small ${fmt(commPct, 0)}% of the runtime. Efficiency barely drops.`,
+        how: `Already the scalable regime. Switch to <b>strong</b> to watch a fixed problem hit the communication wall.`,
+        exp: `This is how HPC fills a big machine — size the problem to the ranks and efficiency stays flat.`,
+      };
+    return {
+      sev: "warn",
+      what: `Strong scaling: speedup climbs then <b>saturates near ${fmt(peak.speedup, 1)}×</b> — at ${c.x} ranks you get <b>${fmt(c.speedup, 1)}×</b> (${fmt(c.efficiency * 100, 0)}% efficiency), and more ranks barely help.`,
+      why: `The global grid is <b>fixed</b>, so per-rank compute shrinks (∝ 1/p) while the halo exchange stays roughly constant and its <b>latency grows ~log(p)</b>. Communication is now <b>${fmt(commPct, 0)}%</b> of the time — the comm wall.`,
+      how: `Either <b>grow the problem with the machine</b> (switch to weak scaling) or cut communication — larger subdomains, fewer/aggregated messages, comm/compute overlap.`,
+      exp: `Weak scaling holds efficiency near ideal; on a real multi-node cluster the strong-scaling wall is even sharper than on one shared-memory node.`,
+    };
+  },
+  cuda(r) {
+    const occ = (r.occupancy ?? 0) * 100, heavy = r.params.variant === "heavy", B = r.current.x;
+    if (!heavy)
+      return {
+        sev: occ > 66 ? "info" : "warn",
+        what: `Light kernel: at <b>${B} threads/block</b> the SM reaches <b>${fmt(occ, 0)}% occupancy</b> (${r.regsPerThread} registers/thread).`,
+        why: `Few live variables means low register pressure, so the SM can host enough warps to hide memory and pipeline latency. Occupancy is bounded by block geometry, not resources.`,
+        how: `Already healthy. Switch to <b>heavy</b> to watch register pressure throttle occupancy on the same GPU.`,
+        exp: `High occupancy keeps the SMs busy; throughput tracks the occupancy curve.`,
+      };
+    return {
+      sev: occ < 50 ? "critical" : "warn",
+      what: `Heavy kernel: at <b>${B} threads/block</b> occupancy is only <b>${fmt(occ, 0)}%</b> — limited by <b>${r.limiter}</b> (${r.regsPerThread} registers/thread).`,
+      why: `Each thread needs ${r.regsPerThread} registers, so a ${B}-thread block claims a big slice of the SM's 64K register file. The SM runs out of registers before warp slots, leaving warps unscheduled — low occupancy and idle latency-hiding capacity. Bigger blocks make it worse.`,
+      how: `<b>Cut register pressure</b> (fewer live variables, recompute instead of cache, <code>__launch_bounds__</code> to cap regs) or pick the occupancy sweet-spot block size (~${r.optimalBlock}).`,
+      exp: `Reducing registers (flip to <b>light</b>) lifts occupancy toward 100% — more warps per SM, better latency hiding.`,
+    };
+  },
 };
 
 export const ExplainMeasured: Record<string, ExplainFn> = {
@@ -148,6 +184,43 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `The triangular loop gives late-indexed threads far more work; with fixed static chunks they finish last while early threads idle. Total time = the slowest thread.`,
       how: `Use <b>schedule(dynamic)</b> or <b>guided</b> so idle threads grab the remaining rows.`,
       exp: `Dynamic rebalances the load — measure the speedup climb on the same cores.`,
+    };
+  },
+  mpiHalo(r) {
+    const c = r.current, weak = r.params.mode === "weak", eff = c.efficiency * 100, lost = r.idlePct ?? 0;
+    if (weak)
+      return {
+        sev: eff > 60 ? "info" : "warn",
+        what: `Measured (weak): on ${c.x} ranks the grid grows with the machine — scaled speedup <b>${fmt(c.speedup, 1)}×</b>, efficiency <b>${fmt(eff, 0)}%</b>.`,
+        why: `Per-rank work is constant, so wall time stays roughly flat as ranks (and the global problem) grow; only halo exchange adds a little (~${fmt(lost, 0)}% overhead).`,
+        how: `This is the scalable regime. Switch to <b>strong</b> to measure the fixed-problem comm wall on this node.`,
+        exp: `Weak scaling is how you keep efficiency high as you add hardware.`,
+      };
+    return {
+      sev: eff > 40 ? "warn" : "critical",
+      what: `Measured (strong): a fixed grid reaches <b>${fmt(c.speedup, 1)}×</b> on ${c.x} ranks (${fmt(eff, 0)}% efficiency); ~${fmt(lost, 0)}% is lost to communication and coordination.`,
+      why: `With the problem fixed, each rank computes less while halo exchange and launch/coordination overhead don't shrink — so efficiency falls as ranks rise.`,
+      how: `Grow the problem with the ranks (weak scaling) or cut communication. <b>Note:</b> on one node MPI uses shared memory, so this wall is gentler than on a real multi-node cluster.`,
+      exp: `Flip to weak scaling and watch efficiency stay high on the very same ranks.`,
+    };
+  },
+  cuda(r) {
+    const occ = (r.occupancy ?? 0) * 100, heavy = r.params.variant === "heavy", B = r.current.x;
+    const dev = r.smName || "the GPU";
+    if (!heavy)
+      return {
+        sev: occ > 60 ? "info" : "warn",
+        what: `Measured on ${dev}: the <b>light</b> kernel hits <b>${fmt(occ, 0)}% occupancy</b> at ${B} threads/block (${r.regsPerThread} regs/thread).`,
+        why: `Low register usage lets many warps reside per SM, so latency is hidden and the SMs stay busy.`,
+        how: `This is the healthy case. Switch to <b>heavy</b> to measure register-limited occupancy on the same card.`,
+        exp: `Compare the two: same GPU, register pressure is the only difference.`,
+      };
+    return {
+      sev: occ < 50 ? "critical" : "warn",
+      what: `Measured on ${dev}: the <b>heavy</b> kernel reaches only <b>${fmt(occ, 0)}%</b> occupancy at ${B} threads/block — limiter: <b>${r.limiter}</b> (${r.regsPerThread} regs/thread).`,
+      why: `At ${r.regsPerThread} registers/thread the SM's register file fills before its warp slots do, so fewer warps run concurrently and latency isn't fully hidden.`,
+      how: `Reduce registers (<code>__launch_bounds__</code>, fewer live values) or choose the measured sweet-spot block (~${r.optimalBlock}). Flip to <b>light</b> to see occupancy recover.`,
+      exp: `The light kernel measures markedly higher occupancy on the very same GPU.`,
     };
   },
 };

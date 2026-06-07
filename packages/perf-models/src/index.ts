@@ -18,6 +18,7 @@ export const TRIAD_AI = 2 / 24; // triad: 2 FLOPs per 24 bytes moved
 const range1 = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
 
 type Extra = (cur: SweepPoint, sweep: SweepPoint[]) => Partial<ExperimentResult>;
+type BuildOpts = { scaling?: "strong" | "weak"; xUnits?: "threads" | "ranks" };
 
 function buildResult(
   expId: string,
@@ -25,14 +26,23 @@ function buildResult(
   timeOf: (p: number) => number,
   extra: Extra,
   source: "model" | "measured" = "model",
+  opts: BuildOpts = {},
 ): ExperimentResult {
+  const scaling = opts.scaling ?? "strong";
+  const xUnits = opts.xUnits ?? "threads";
   const t1 = timeOf(1);
   const sweep: SweepPoint[] = range1(MAXP).map((p) => {
     const t = timeOf(p);
-    const sp = t1 / t;
-    return { x: p, time: t, speedup: sp, efficiency: sp / p };
+    const ratio = t1 / t;
+    // Strong scaling (fixed work): speedup = t1/t(p). Weak scaling (work grows ∝ p):
+    // the meaningful metrics are *scaled* speedup p·t1/t(p) and efficiency t1/t(p),
+    // both of which still render against the y=x ideal and the right-axis efficiency.
+    const speedup = scaling === "weak" ? p * ratio : ratio;
+    const efficiency = scaling === "weak" ? ratio : ratio / p;
+    return { x: p, time: t, speedup, efficiency };
   });
-  const cur = sweep[clamp(params.threads, 1, MAXP) - 1];
+  const xparam = params.ranks ?? params.threads;
+  const cur = sweep[clamp(xparam, 1, MAXP) - 1];
   return {
     experimentId: expId,
     source,
@@ -41,6 +51,7 @@ function buildResult(
     sweep,
     current: cur,
     metrics: [],
+    xUnits,
     ...extra(cur, sweep),
   };
 }
@@ -61,7 +72,37 @@ export const EXPERIMENTS = [
   { id: "synchronization", name: "Synchronization", scene: "thread timeline · lock serialization" },
   { id: "bandwidth", name: "Bandwidth Saturation", scene: "memory bus · roofline" },
   { id: "imbalance", name: "Load Imbalance", scene: "thread timeline · idle tails" },
+  { id: "mpiHalo", name: "MPI Halo Exchange", scene: "ranks · halo exchange · comm wall" },
+  { id: "cuda", name: "GPU Occupancy", scene: "warps · SMs · register pressure" },
 ];
+
+// MPI halo model: compute that scales with ranks + a communication term that grows ~log(ranks).
+export const HALO = { T1: 1000, Tc0: 8, Tc1: 18 };
+
+/* ---- GPU occupancy model (the standard CUDA Occupancy Calculator) ---- */
+export const CUDA_BLOCKS = Array.from({ length: 32 }, (_, i) => (i + 1) * 32); // 32..1024 step 32
+export const REF_GPU = {
+  name: "RTX 5060 Laptop (model)",
+  warpSize: 32, maxWarpsPerSM: 48, regsPerSM: 65536, maxBlocksPerSM: 32, maxThreadsPerBlock: 1024,
+  regsLight: 32, regsHeavy: 128,
+};
+
+// Active warps/SM and the binding limiter for a block of B threads using R registers/thread.
+function cudaOccupancy(B: number, R: number): { occ: number; limiter: string } {
+  const wpb = Math.ceil(B / REF_GPU.warpSize);
+  const regsPerWarp = Math.ceil((R * REF_GPU.warpSize) / 256) * 256; // 256-reg warp granularity
+  const regLimit = Math.floor(REF_GPU.regsPerSM / (regsPerWarp * wpb));
+  const warpLimit = Math.floor(REF_GPU.maxWarpsPerSM / wpb);
+  const active = Math.max(0, Math.min(regLimit, warpLimit, REF_GPU.maxBlocksPerSM));
+  const occ = Math.min(1, (active * wpb) / REF_GPU.maxWarpsPerSM);
+  let limiter = "none (full)";
+  if (occ < 0.99) {
+    if (regLimit <= warpLimit && regLimit <= REF_GPU.maxBlocksPerSM) limiter = "registers";
+    else if (REF_GPU.maxBlocksPerSM <= warpLimit) limiter = "block count";
+    else limiter = "block size";
+  }
+  return { occ, limiter };
+}
 
 /* ===================== Producer A — models ===================== */
 export const Models: Record<string, (p: any) => ExperimentResult> = {
@@ -148,6 +189,56 @@ export const Models: Record<string, (p: any) => ExperimentResult> = {
       };
     });
   },
+  mpiHalo(params) {
+    const weak = params.mode === "weak";
+    const comm = (p: number) => HALO.Tc0 + HALO.Tc1 * Math.log2(p || 1);
+    const compute = (p: number) => (weak ? HALO.T1 : HALO.T1 / p); // weak: fixed work per rank
+    const timeOf = (p: number) => compute(p) + comm(p);
+    return buildResult("mpiHalo", params, timeOf, (cur, sw) => {
+      const commPct = (comm(cur.x) / cur.time) * 100;
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      return {
+        peak,
+        idlePct: commPct,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: weak ? "good" : "warn" },
+          { k: weak ? "Scaled speedup" : "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Comm fraction", v: fmt(commPct, 0) + "%", tone: commPct < 15 ? "good" : commPct < 40 ? "warn" : "bad" },
+          weak
+            ? { k: "Ideal (linear)", v: cur.x + "×", tone: "accent" }
+            : { k: "Comm wall", v: "≈ " + fmt(peak.speedup, 1) + "×", tone: "accent" },
+        ],
+      };
+    }, "model", { scaling: weak ? "weak" : "strong", xUnits: "ranks" });
+  },
+  cuda(params) {
+    const R = params.variant === "heavy" ? REF_GPU.regsHeavy : REF_GPU.regsLight;
+    let sweep: SweepPoint[] = CUDA_BLOCKS.map((B) => {
+      const { occ } = cudaOccupancy(B, R);
+      const smallPenalty = B < 128 ? (128 - B) / 320 : 0;        // tiny blocks under-hide latency
+      const throughput = Math.max(0.05, occ) * (1 - smallPenalty);
+      return { x: B, time: 100 / throughput, speedup: throughput, efficiency: occ, occ };
+    });
+    const bestPerf = Math.max(...sweep.map((s) => s.speedup));
+    sweep = sweep.map((s) => ({ ...s, speedup: s.speedup / bestPerf }));
+    const cur = sweep.find((s) => s.x === params.blockSize) || sweep[sweep.length - 1];
+    const optimal = sweep.reduce((a, b) => ((b.occ ?? 0) > (a.occ ?? 0) ? b : a), sweep[0]);
+    const { limiter } = cudaOccupancy(cur.x, R);
+    return {
+      experimentId: "cuda", source: "model", referenceMachine: REF.id, params,
+      sweep, current: cur, xUnits: "block",
+      occupancy: cur.occ, limiter, regsPerThread: R, optimalBlock: optimal.x, smName: REF_GPU.name,
+      metrics: [
+        { k: "Occupancy", v: fmt((cur.occ ?? 0) * 100, 0) + "%", tone: (cur.occ ?? 0) > 0.66 ? "good" : (cur.occ ?? 0) > 0.4 ? "warn" : "bad" },
+        { k: "Threads/block", v: String(cur.x), tone: "" },
+        { k: "Active warps/SM", v: fmt((cur.occ ?? 0) * REF_GPU.maxWarpsPerSM, 0) + " / " + REF_GPU.maxWarpsPerSM, tone: "" },
+        { k: "Registers/thread", v: String(R), tone: R > 64 ? "bad" : "good" },
+        { k: "Limiter", v: limiter, tone: limiter === "registers" ? "bad" : limiter.startsWith("none") ? "good" : "warn" },
+        { k: "Best @ block", v: optimal.x + " (" + fmt((optimal.occ ?? 0) * 100, 0) + "%)", tone: "accent" },
+      ],
+    } as ExperimentResult;
+  },
 };
 
 /* ===================== Producer B — measured adapters ===================== */
@@ -227,5 +318,55 @@ export const Measured: Record<string, (p: any, data: RunnerData) => ExperimentRe
         ],
       };
     }, "measured");
+  },
+  mpiHalo(params, data) {
+    const weak = params.mode === "weak";
+    return buildResult("mpiHalo", params, tLookup(data), (cur, sw) => {
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      const lost = Math.max(0, (1 - cur.efficiency) * 100); // gap to ideal = overhead/comm
+      return {
+        peak,
+        idlePct: lost,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: weak ? "good" : "warn" },
+          { k: weak ? "Scaled speedup" : "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.6 ? "good" : cur.efficiency > 0.35 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.6 ? "good" : cur.efficiency > 0.35 ? "warn" : "bad" },
+          { k: weak ? "Overhead" : "Lost to comm", v: fmt(lost, 0) + "%", tone: lost < 20 ? "good" : lost < 50 ? "warn" : "bad" },
+          weak
+            ? { k: "Ideal (linear)", v: cur.x + "×", tone: "accent" }
+            : { k: "Peak speedup", v: fmt(peak.speedup, 1) + "× @ " + peak.x + "r", tone: "accent" },
+        ],
+      };
+    }, "measured", { scaling: weak ? "weak" : "strong", xUnits: "ranks" });
+  },
+  cuda(params, data) {
+    const meta = data as RunnerData & { regs?: number; sm?: string; maxWarpsPerSM?: number };
+    const pts = data.points;
+    const perfOf = (p: typeof pts[number]) => p.gflops ?? 1 / (p.ms || 1);
+    const bestPerf = Math.max(...pts.map(perfOf));
+    let sweep: SweepPoint[] = pts.map((pt) => ({
+      x: pt.p, time: pt.ms, speedup: perfOf(pt) / bestPerf, efficiency: pt.occ ?? 0, occ: pt.occ ?? 0,
+    }));
+    const cur = sweep.find((s) => s.x === params.blockSize) || sweep[sweep.length - 1];
+    const curPt = pts[sweep.indexOf(cur)] ?? pts[pts.length - 1];
+    const optimal = sweep.reduce((a, b) => ((b.occ ?? 0) > (a.occ ?? 0) ? b : a), sweep[0]);
+    const maxWarps = meta.maxWarpsPerSM ?? 48, regs = meta.regs ?? 0, occ = cur.occ ?? 0;
+    // Structural warp limit for this block size; if achieved occ falls short of it, registers/shared cap it.
+    const wpb = Math.max(1, Math.ceil(cur.x / 32));
+    const warpLimited = Math.min(1, (Math.floor(maxWarps / wpb) * wpb) / maxWarps);
+    const limiter = occ >= 0.99 ? "none (full)" : occ >= warpLimited - 0.02 ? "block size" : "registers";
+    return {
+      experimentId: "cuda", source: "measured", referenceMachine: REF.id, params,
+      sweep, current: cur, xUnits: "block",
+      occupancy: occ, limiter, regsPerThread: regs, optimalBlock: optimal.x, smName: meta.sm, gflops: curPt.gflops,
+      metrics: [
+        { k: "Occupancy", v: fmt(occ * 100, 0) + "%", tone: occ > 0.66 ? "good" : occ > 0.4 ? "warn" : "bad" },
+        { k: "Threads/block", v: String(cur.x), tone: "" },
+        { k: "Registers/thread", v: regs ? String(regs) : "—", tone: regs > 64 ? "bad" : "good" },
+        { k: "Performance", v: fmt(curPt.gflops ?? 0, 0) + " GFLOP/s", tone: "accent" },
+        { k: "Limiter", v: limiter, tone: limiter === "registers" ? "bad" : limiter.startsWith("none") ? "good" : "warn" },
+        { k: "Best @ block", v: optimal.x + " (" + fmt((optimal.occ ?? 0) * 100, 0) + "%)", tone: "accent" },
+      ],
+    } as ExperimentResult;
   },
 };
