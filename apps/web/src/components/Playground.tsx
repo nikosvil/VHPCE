@@ -6,8 +6,14 @@ import { drawScaling } from "@vhpce/viz";
 import { fmt } from "@vhpce/profile-schema";
 import { health, runJob, type Phase } from "../lib/runner";
 import { EXAMPLES } from "./playground-examples";
+import Term from "./Term";
+import { GLOSSARY } from "./glossary";
 
 const SWEEP = [1, 2, 4, 8, 12, 16, 20, 24];
+
+// Wrap a label in a hover-glossary <Term> when it matches a known term, else plain text.
+const termify = (label: string) =>
+  GLOSSARY[label.toLowerCase()] ? <Term k={label.toLowerCase()}>{label}</Term> : label;
 
 const STARTER = EXAMPLES[0].source;   // "Parallel sum" — the default starting point
 
@@ -193,7 +199,7 @@ export default function Playground() {
               <div>
                 {result.metrics.map((m, i) => (
                   <div className="metric" key={i}>
-                    <span className="k">{m.k}</span>
+                    <span className="k">{termify(m.k)}</span>
                     <span className={"v " + m.tone}>{m.v}</span>
                   </div>
                 ))}
