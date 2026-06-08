@@ -16,7 +16,17 @@ const SWEEP = [1, 2, 4, 8, 12, 16, 20, 24];
 const termify = (label: string) =>
   GLOSSARY[label.toLowerCase()] ? <Term k={label.toLowerCase()}>{label}</Term> : label;
 
-const STARTER = EXAMPLES[0].source;   // "Parallel sum" — the default starting point
+const STARTER = EXAMPLES[0].source;   // the gentlest example — the default starting point
+
+// Predict-before-you-run: the learner commits to a speedup bucket, then sees reality.
+const PRED_BUCKETS = [
+  { id: "slower", label: "Slower (<1×)" },
+  { id: "none", label: "No help (≈1×)" },
+  { id: "partial", label: "Partial (a few×)" },
+  { id: "strong", label: "Strong (15×+)" },
+];
+const bucketOf = (sp: number) => (sp < 1 ? "slower" : sp < 3 ? "none" : sp < 12 ? "partial" : "strong");
+const bucketLabel = (id: string) => PRED_BUCKETS.find((b) => b.id === id)?.label ?? id;
 
 type Point = { p: number; ms: number };
 type Cache = { d1MissPct?: number; lldMissPct?: number; llMissPct?: number; irefs?: number; error?: string };
@@ -73,6 +83,7 @@ function reading(r: ReturnType<typeof buildResult>): string {
 export default function Playground() {
   const [source, setSource] = useState(STARTER);
   const [activeEx, setActiveEx] = useState<Example | null>(EXAMPLES[0]);
+  const [predict, setPredict] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<Phase | null>(null);
   const [data, setData] = useState<RunData | null>(null);
@@ -151,7 +162,7 @@ export default function Playground() {
           <div className="pg-examples">
             <span className="pg-examples-label">Examples:</span>
             {EXAMPLES.map((ex) => (
-              <button key={ex.id} className={"pg-ex-btn" + (activeEx?.id === ex.id ? " on" : "")} title={ex.blurb} onClick={() => { setSource(ex.source); setActiveEx(ex); }}>{ex.label}</button>
+              <button key={ex.id} className={"pg-ex-btn" + (activeEx?.id === ex.id ? " on" : "")} title={ex.blurb} onClick={() => { setSource(ex.source); setActiveEx(ex); setPredict(null); }}>{ex.label}</button>
             ))}
           </div>
           {activeEx && (
@@ -168,6 +179,14 @@ export default function Playground() {
             onChange={(v) => setSource(v ?? "")}
             options={{ fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false, fontFamily: "ui-monospace, monospace", tabSize: 4 }}
           />
+          <div className="pg-predict">
+            <span className="pg-predict-q">🔮 Predict the speedup on 24 cores:</span>
+            <div className="seg fix">
+              {PRED_BUCKETS.map((b) => (
+                <button key={b.id} className={predict === b.id ? "on" : ""} onClick={() => setPredict(b.id)}>{b.label}</button>
+              ))}
+            </div>
+          </div>
           <div className="pg-runrow">
             <button className="pg-run" disabled={!canRun} onClick={run}>
               {running
@@ -204,6 +223,12 @@ export default function Playground() {
                 <div className="big" style={{ color: heroColor(result.current.efficiency) }}>{fmt(result.current.speedup, 1)}×</div>
                 <div className="cap">speedup on {result.current.x} of {data?.cores ?? 24} cores</div>
               </div>
+              {predict && (
+                <div className={"pg-reveal " + (bucketOf(result.current.speedup) === predict ? "hit" : "miss")}>
+                  {bucketOf(result.current.speedup) === predict ? "✓ Nice call — " : "✗ Not quite — "}
+                  you predicted <b>{bucketLabel(predict)}</b>; measured <b>{fmt(result.current.speedup, 1)}×</b> ({bucketLabel(bucketOf(result.current.speedup))}).
+                </div>
+              )}
               <div>
                 {result.metrics.map((m, i) => (
                   <div className="metric" key={i}>
