@@ -1303,3 +1303,16 @@ export const ENTRIES: RefEntry[] = [
 export const TECHS: Tech[] = ["OpenMP", "MPI", "OpenACC"];
 export const categoriesFor = (tech: Tech) =>
   Array.from(new Set(ENTRIES.filter((e) => e.tech === tech).map((e) => e.category)));
+
+// The must-know directives a newcomer actually needs first — powers the /reference
+// "Essentials" filter so the ~200-entry library isn't overwhelming on day one.
+export const ESSENTIAL = new Set<string>([
+  // OpenMP
+  "omp_parallel", "omp_parallel_for", "omp_for", "omp_reduction", "omp_critical", "omp_atomic",
+  "omp_barrier", "omp_private", "omp_shared", "omp_schedule_dynamic", "omp_get_thread_num",
+  // MPI
+  "mpi_init", "mpi_comm_rank", "mpi_comm_size", "mpi_send", "mpi_recv", "mpi_bcast",
+  "mpi_scatter", "mpi_gather", "mpi_reduce", "mpi_allreduce", "mpi_barrier",
+  // OpenACC
+  "acc_parallel_loop", "acc_kernels", "acc_data", "acc_copyin",
+]);
