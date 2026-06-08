@@ -25,6 +25,9 @@ const ACC_END: Record<string, string> = {
 
 function endName(dir: string, ends: Record<string, string>): string | null {
   const head = dir.split("(")[0].trim();
+  // Standalone executable directives that take NO paired `end` — they'd otherwise be caught
+  // by the "target " prefix of the block-construct key below and emit a bogus `end target`.
+  if (/^target (enter data|exit data|update)\b/.test(head)) return null;
   for (const k of Object.keys(ends).sort((a, b) => b.length - a.length)) {
     if (head === k || head.startsWith(k + " ")) return ends[k];
   }
