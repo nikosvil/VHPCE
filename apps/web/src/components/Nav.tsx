@@ -8,6 +8,7 @@ export default function Nav() {
   return (
     <nav className="topnav">
       <span className="topnav-brand">VHPCE</span>
+      <Link href="/start" className={p === "/start" ? "active" : ""}>Start</Link>
       <Link href="/learn" className={p === "/learn" ? "active" : ""}>Learn</Link>
       <Link href="/reference" className={p === "/reference" ? "active" : ""}>Reference</Link>
       <Link href="/lab" className={p === "/lab" ? "active" : ""}>Heat Lab</Link>
