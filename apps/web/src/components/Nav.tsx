@@ -12,6 +12,7 @@ export default function Nav() {
       <Link href="/reference" className={p === "/reference" ? "active" : ""}>Reference</Link>
       <Link href="/lab" className={p === "/lab" ? "active" : ""}>Heat Lab</Link>
       <Link href="/" className={p === "/" ? "active" : ""}>Flagship</Link>
+      <Link href="/compare" className={p === "/compare" ? "active" : ""}>Compare</Link>
       <Link href="/playground" className={p === "/playground" ? "active" : ""}>Playground</Link>
     </nav>
   );

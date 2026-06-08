@@ -92,6 +92,51 @@ export function drawOccupancy(svgEl: SVGSVGElement, res: ExperimentResult): void
   svg.append("text").attr("x", (m.l + W - m.r) / 2).attr("y", H - 2).attr("fill", C.dim).attr("font-size", 10).attr("text-anchor", "middle").text("threads / block");
 }
 
+// "Same kernel, every model" overlay: the SAME experiment rendered from both producers at once —
+// the analytical model (dashed) vs the measured run (solid), with the gap shaded so the model's
+// blind spots are visible. y is occupancy when present, else efficiency (achieved / ideal).
+export function drawOverlay(svgEl: SVGSVGElement, model: ExperimentResult, measured: ExperimentResult | null): void {
+  const svg = d3.select(svgEl);
+  svg.selectAll("*").remove();
+  const W = svgEl.clientWidth || 560, H = svgEl.clientHeight || 280, m = { t: 16, r: 18, b: 42, l: 52 };
+  const logX = model.experimentId === "cudaCoalesce" || model.experimentId === "cudaDivergence" || model.experimentId === "cuda";
+  const useOcc = model.sweep.some((p) => p.occ != null);
+  const yPick = (p: SweepPoint) => (useOcc ? (p.occ ?? p.efficiency) : p.efficiency);
+  const allX = model.sweep.map((p) => p.x);
+  const xmin = Math.min(...allX), xmax = Math.max(...allX);
+  const x = logX
+    ? d3.scaleLog().base(2).domain([xmin, xmax]).range([m.l, W - m.r])
+    : d3.scaleLinear().domain([xmin, xmax]).range([m.l, W - m.r]);
+  const y = d3.scaleLinear().domain([0, 1]).range([H - m.b, m.t]);
+  svg.append("g").selectAll("line").data(y.ticks(5)).join("line").attr("class", "grid-line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", (d) => y(d)).attr("y2", (d) => y(d));
+
+  // shaded divergence band between the two curves (shared x only)
+  if (measured) {
+    const byX = new Map(measured.sweep.map((p) => [p.x, yPick(p)]));
+    const band = model.sweep.filter((p) => byX.has(p.x)).map((p) => ({ x: p.x, a: yPick(p), b: byX.get(p.x)! }));
+    const area = d3.area<{ x: number; a: number; b: number }>().x((d) => x(d.x)).y0((d) => y(d.a)).y1((d) => y(d.b)).curve(d3.curveMonotoneX);
+    svg.append("path").datum(band).attr("fill", C.warn).attr("opacity", 0.16).attr("d", area as any);
+  }
+
+  const mkLine = d3.line<SweepPoint>().x((p) => x(p.x)).y((p) => y(yPick(p))).curve(d3.curveMonotoneX);
+  // model — dashed
+  svg.append("path").datum(model.sweep).attr("fill", "none").attr("stroke", C.accent2).attr("stroke-width", 2).attr("stroke-dasharray", "6 5").attr("d", mkLine as any);
+  svg.append("g").selectAll("circle").data(model.sweep).join("circle").attr("cx", (p) => x(p.x)).attr("cy", (p) => y(yPick(p))).attr("r", 2.5).attr("fill", C.accent2);
+  // measured — solid
+  if (measured) {
+    svg.append("path").datum(measured.sweep).attr("fill", "none").attr("stroke", C.accent).attr("stroke-width", 2.5).attr("d", mkLine as any);
+    svg.append("g").selectAll("circle").data(measured.sweep).join("circle").attr("cx", (p) => x(p.x)).attr("cy", (p) => y(yPick(p))).attr("r", 3).attr("fill", C.accent);
+  }
+
+  const xaxis = d3.axisBottom(x).tickFormat(d3.format("d"));
+  if (logX) xaxis.tickValues(allX); else xaxis.ticks(6);
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(xaxis as any);
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickFormat(d3.format(".0%")) as any);
+  const xlab = model.xLabel ?? (model.xUnits === "ranks" ? "ranks" : model.experimentId === "cuda" ? "threads / block" : "threads");
+  svg.append("text").attr("x", (m.l + W - m.r) / 2).attr("y", H - 4).attr("fill", C.dim).attr("font-size", 10).attr("text-anchor", "middle").text(xlab);
+  svg.append("text").attr("transform", "rotate(-90)").attr("x", -(H / 2)).attr("y", 14).attr("fill", C.dim).attr("font-size", 10).attr("text-anchor", "middle").text(useOcc ? "occupancy" : "efficiency (achieved / ideal)");
+}
+
 // Generic GPU sweep chart: efficiency (0..1) vs a log2 x-axis (stride, paths, …). Used by the
 // coalescing and divergence experiments. x-label comes from res.xLabel.
 export function drawSweep(svgEl: SVGSVGElement, res: ExperimentResult): void {
