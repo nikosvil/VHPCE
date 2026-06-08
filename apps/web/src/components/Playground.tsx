@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import Editor from "@monaco-editor/react";
 import { drawScaling } from "@vhpce/viz";
 import { fmt } from "@vhpce/profile-schema";
@@ -66,6 +67,24 @@ function buildResult(points: Point[]) {
 
 function heroColor(e: number) {
   return e > 0.7 ? "var(--good)" : e > 0.4 ? "var(--warn)" : "var(--bad)";
+}
+
+// Plain-language verdict + a "what now?" link to the Flagship experiment that isolates the cause.
+type Dx = { tone: string; headline: string; next: { label: string; href: string } };
+function diagnose(r: ReturnType<typeof buildResult>, cache?: Cache): Dx {
+  const e = r.current.efficiency, sp = r.current.speedup;
+  const cacheKnown = (cache?.d1MissPct ?? -1) >= 0;
+  const memBound = (cache?.d1MissPct ?? -1) > 20;
+  if (e > 0.7)
+    return { tone: "good", headline: "Strong scaling — this kernel genuinely parallelizes. 🎉", next: { label: "→ What eventually limits it? Bandwidth Saturation", href: "/?exp=bandwidth" } };
+  if (memBound)
+    return { tone: "warn", headline: "Memory-bound: cache misses are high, so DRAM bandwidth is the wall — adding cores won't help.", next: { label: "→ See the memory wall: Bandwidth Saturation", href: "/?exp=bandwidth" } };
+  if (sp < 1)
+    return { tone: "bad", headline: "It ran SLOWER with more threads — a sign of heavy contention or all-core clock throttling.", next: { label: "→ See contention isolated: Synchronization", href: "/?exp=synchronization" } };
+  if (cacheKnown)
+    return { tone: "warn", headline: "Underscaling, but the cache is healthy — so a serial part, synchronization, or load imbalance is the cap, not memory.", next: { label: "→ Find the culprit: the Flagship experiments", href: "/" } };
+  // cache not measured: be honest about the ambiguity and nudge toward the profiler.
+  return { tone: "warn", headline: "It stopped scaling — could be memory bandwidth, false sharing, or a serial part. Tick “Profile cache misses” below to separate memory from the rest.", next: { label: "→ Explore the four bottlenecks: the Flagship", href: "/" } };
 }
 
 function reading(r: ReturnType<typeof buildResult>): string {
@@ -208,7 +227,7 @@ export default function Playground() {
         <section className="card">
           <h2>Result</h2>
           {!data && !running && (
-            <div className="askai-note">Edit the code and hit Run. It compiles and runs in a locked-down container — no network, dropped capabilities, memory/PID/time limits.</div>
+            <div className="askai-note">Pick an example (or write your own), make a prediction, and hit Run. It compiles and benchmarks on 24 real cores, then explains the result in plain English — and points you to the experiment that isolates whatever it finds. New here? Try <Link href="/start">the guided first run →</Link></div>
           )}
           {running && <div className="askai-note">{phase === "queued" ? "Queued — waiting for the runner…" : "Compiling and sweeping thread counts on your 24 cores…"}</div>}
           {data?.error === "compile" && (
@@ -238,10 +257,19 @@ export default function Playground() {
                 ))}
               </div>
               <div className="chart" style={{ marginTop: 12 }}><svg ref={svgRef} /></div>
-              <div className="eb why" style={{ marginTop: 12 }}>
-                <div className="t">Reading</div>
-                <div className="body"><Glossed>{reading(result)}</Glossed></div>
-              </div>
+              {(() => {
+                const dx = diagnose(result, data?.cache);
+                return (
+                  <div className="eb why" style={{ marginTop: 12 }}>
+                    <div className="t">Reading</div>
+                    <div className="body">
+                      <div className={"pg-verdict " + dx.tone}>{dx.headline}</div>
+                      <Glossed>{reading(result)}</Glossed>
+                      <Link className="learn-link" href={dx.next.href}>{dx.next.label}</Link>
+                    </div>
+                  </div>
+                );
+              })()}
               {data?.cache && !data.cache.error && (
                 <div className="eb how" style={{ marginTop: 12 }}>
                   <div className="t">Cache · cachegrind (1 thread, simulated)</div>
