@@ -5,7 +5,7 @@ import Editor from "@monaco-editor/react";
 import { drawScaling } from "@vhpce/viz";
 import { fmt } from "@vhpce/profile-schema";
 import { health, runJob, type Phase } from "../lib/runner";
-import { EXAMPLES } from "./playground-examples";
+import { EXAMPLES, type Example } from "./playground-examples";
 import Term from "./Term";
 import { GLOSSARY } from "./glossary";
 import Glossed from "./Glossed";
@@ -72,6 +72,7 @@ function reading(r: ReturnType<typeof buildResult>): string {
 
 export default function Playground() {
   const [source, setSource] = useState(STARTER);
+  const [activeEx, setActiveEx] = useState<Example | null>(EXAMPLES[0]);
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<Phase | null>(null);
   const [data, setData] = useState<RunData | null>(null);
@@ -92,7 +93,7 @@ export default function Playground() {
     const ex = new URLSearchParams(window.location.search).get("ex");
     const found = ex ? EXAMPLES.find((e) => e.id === ex) : null;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional URL sync on mount (SSR-safe)
-    if (found) setSource(found.source);
+    if (found) { setSource(found.source); setActiveEx(found); }
   }, []);
 
   const points = data?.points || null;
@@ -150,9 +151,15 @@ export default function Playground() {
           <div className="pg-examples">
             <span className="pg-examples-label">Examples:</span>
             {EXAMPLES.map((ex) => (
-              <button key={ex.id} className="pg-ex-btn" title={ex.blurb} onClick={() => setSource(ex.source)}>{ex.label}</button>
+              <button key={ex.id} className={"pg-ex-btn" + (activeEx?.id === ex.id ? " on" : "")} title={ex.blurb} onClick={() => { setSource(ex.source); setActiveEx(ex); }}>{ex.label}</button>
             ))}
           </div>
+          {activeEx && (
+            <div className="pg-coach">
+              <span className="pg-coach-blurb">{activeEx.blurb}</span>
+              {activeEx.tryThis && <span className="pg-coach-try"><b>▶ Try:</b> {activeEx.tryThis}</span>}
+            </div>
+          )}
           <Editor
             height="440px"
             defaultLanguage="c"
