@@ -201,6 +201,12 @@ footer.note code { font-family: var(--mono); color: var(--muted); background: #0
 .ref-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .ref-search { flex: 1; min-width: 220px; background: #0c1320; border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 9px 14px; font-size: 13px; font-family: var(--sans); outline: none; }
 .ref-search:focus { border-color: var(--accent); }
+.ref-essentials { border: 1px solid var(--line); background: #0c1320; color: var(--muted); border-radius: 999px; padding: 8px 14px; font-size: 12.5px; font-family: var(--sans); cursor: pointer; transition: .12s; white-space: nowrap; }
+.ref-essentials:hover { color: var(--text); border-color: #2c3a50; }
+.ref-essentials.on { color: #04121a; background: var(--warn); border-color: transparent; font-weight: 700; }
+.ref-essentials-note { font-size: 12px; color: var(--muted); margin: -6px 0 14px; padding: 8px 12px; border-radius: 8px; background: rgba(255,180,84,.08); border: 1px solid rgba(255,180,84,.2); }
+.ref-essentials-note b { color: var(--warn); }
+.ref-star { color: var(--warn); }
 .ref-grid { display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }
 @media (max-width: 900px) { .ref-grid { grid-template-columns: 1fr; } }
 .ref-list { max-height: 72vh; overflow: auto; padding: 10px; }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { archetypes } from "./reference/archetypes";
-import { ENTRIES, TECHS, type RefEntry, type Tech } from "./reference/entries";
+import { ENTRIES, TECHS, ESSENTIAL, type RefEntry, type Tech } from "./reference/entries";
 import { toFortran } from "./reference/fortran";
 import { GLOSSARY_KEYS } from "./glossary";
 import Term from "./Term";
@@ -16,6 +16,7 @@ const byId = (id: string) => ENTRIES.find((e) => e.id === id);
 export default function Reference() {
   const [filter, setFilter] = useState<Filter>("All");
   const [q, setQ] = useState("");
+  const [essentialsOnly, setEssentialsOnly] = useState(false);
   const [selId, setSelId] = useState<string>(ENTRIES[0].id);
   const [lang, setLang] = useState<"C" | "Fortran">("C");
 
@@ -29,11 +30,13 @@ export default function Reference() {
   const query = q.trim().toLowerCase();
   const filtered = useMemo(
     () =>
-      ENTRIES.filter((e) => filter === "All" || e.tech === filter).filter((e) => {
-        if (!query) return true;
-        return (`${e.name} ${e.summary} ${e.category} ${e.signature} ${e.note ?? ""}`).toLowerCase().includes(query);
-      }),
-    [filter, query],
+      ENTRIES.filter((e) => filter === "All" || e.tech === filter)
+        .filter((e) => !essentialsOnly || ESSENTIAL.has(e.id))
+        .filter((e) => {
+          if (!query) return true;
+          return (`${e.name} ${e.summary} ${e.category} ${e.signature} ${e.note ?? ""}`).toLowerCase().includes(query);
+        }),
+    [filter, query, essentialsOnly],
   );
 
   // group filtered entries by category, preserving entry order
@@ -46,7 +49,7 @@ export default function Reference() {
   // Prefer the selected entry, but if a filter/search hid it, fall back to the first visible one.
   const sel = filtered.find((e) => e.id === selId) ?? filtered[0] ?? ENTRIES[0];
   // Jump to any entry (e.g. a cross-tech "related" link) by clearing filters first.
-  const goTo = (id: string) => { setFilter("All"); setQ(""); setSelId(id); };
+  const goTo = (id: string) => { setFilter("All"); setQ(""); setEssentialsOnly(false); setSelId(id); };
   const selRef = useRef(sel);
   useEffect(() => { selRef.current = sel; });
 
@@ -107,7 +110,19 @@ export default function Reference() {
             <button key={t} className={filter === t ? "on" : ""} onClick={() => setFilter(t)}>{t}</button>
           ))}
         </div>
+        <button
+          className={"ref-essentials" + (essentialsOnly ? " on" : "")}
+          title="Show only the must-know directives for newcomers"
+          onClick={() => setEssentialsOnly((v) => !v)}
+        >
+          ★ Essentials
+        </button>
       </div>
+      {essentialsOnly && (
+        <div className="ref-essentials-note">
+          The {ESSENTIAL.size} directives a newcomer needs first. Found your footing? Turn <b>★ Essentials</b> off for the full library.
+        </div>
+      )}
 
       <div className="ref-grid">
         <aside className="card ref-list">
@@ -117,7 +132,7 @@ export default function Reference() {
               <div className="ref-cat-h">{cat}</div>
               {items.map((e) => (
                 <button key={e.id} className={"ref-item" + (e.id === sel.id ? " sel" : "")} onClick={() => setSelId(e.id)}>
-                  <span className="ref-item-name">{e.name}</span>
+                  <span className="ref-item-name">{ESSENTIAL.has(e.id) && <span className="ref-star" title="essential">★ </span>}{e.name}</span>
                   <span className={"ref-tech " + e.tech.toLowerCase()}>{e.tech}</span>
                 </button>
               ))}
