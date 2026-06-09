@@ -260,6 +260,38 @@ footer.note code { font-family: var(--mono); color: var(--muted); background: #0
 .ref-detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .ref-cat-tag { font-size: 11px; color: var(--dim); }
 .ref-sig { margin: 0 0 12px; }
+
+/* ---- Badge toast (global, fixed bottom-right) ---- */
+.badge-toast {
+  position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 18px; border-radius: 14px;
+  background: linear-gradient(135deg, #131d2e, #0e1727);
+  border: 1px solid rgba(179,136,255,.45);
+  box-shadow: 0 8px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(179,136,255,.1);
+  color: var(--text); max-width: 320px;
+  animation: badge-slide-in .3s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes badge-slide-in {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.badge-toast-icon { font-size: 28px; flex: none; }
+.badge-toast-title { font-size: 13px; font-weight: 700; color: var(--accent2); margin-bottom: 2px; }
+.badge-toast-desc  { font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+/* ---- Badge grid (inside Badges tab) ---- */
+.badge-grid { display: flex; flex-direction: column; gap: 8px; }
+.badge {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel2);
+  opacity: .45; transition: .15s;
+}
+.badge.got { opacity: 1; border-color: rgba(179,136,255,.35); background: rgba(179,136,255,.06); }
+.badge-icon { font-size: 22px; flex: none; width: 30px; text-align: center; }
+.badge-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.badge-desc  { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
 .ref-summary { font-size: 13.5px; color: var(--text); line-height: 1.55; margin: 0 0 12px; }
 .ref-canvas { position: relative; }
 .ref-canvas canvas.viz { min-height: 300px; }

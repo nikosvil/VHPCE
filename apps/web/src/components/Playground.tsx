@@ -7,6 +7,7 @@ import { drawScaling } from "@vhpce/viz";
 import { fmt } from "@vhpce/profile-schema";
 import { health, runJob, type Phase } from "../lib/runner";
 import { PRED_BUCKETS, bucketOf, bucketLabel } from "../lib/buckets";
+import { recordRun, recordPredict } from "../lib/badges";
 import { EXAMPLES, type Example } from "./playground-examples";
 import Term from "./Term";
 import { GLOSSARY } from "./glossary";
@@ -159,7 +160,13 @@ export default function Playground() {
         { onStatus: (p) => { if (my === runIdRef.current) setPhase(p); } },
       );
       if (my !== runIdRef.current) return; // superseded by a newer run
-      setData(result as RunData);
+      const d = result as RunData;
+      setData(d);
+      if (d.points && d.points.length) {
+        const r = buildResult(d.points);
+        recordRun({ speedup: r.current.speedup, profiled: profile && !!d.cache });
+        if (predict) recordPredict(bucketOf(r.current.speedup) === predict);
+      }
     } catch (e: unknown) {
       if (my !== runIdRef.current) return;
       setData({ error: "network", message: String((e as Error)?.message || e) });

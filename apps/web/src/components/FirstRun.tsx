@@ -6,6 +6,7 @@ import { drawScaling } from "@vhpce/viz";
 import { fmt } from "@vhpce/profile-schema";
 import { health, runJob, type Phase } from "../lib/runner";
 import { PRED_BUCKETS, bucketOf, bucketLabel } from "../lib/buckets";
+import { recordRun, recordPredict } from "../lib/badges";
 import { EXAMPLES } from "./playground-examples";
 
 // A hands-on "New to HPC? Start here" path: three runs on real cores that tell one story —
@@ -120,7 +121,17 @@ export default function FirstRun() {
       { kind: "code", source: src(s.exId), threads: SWEEP, reps: 1 },
       { onStatus: (p) => { if (my === runId.current) setPhase(p); } },
     )
-      .then((d) => { if (my === runId.current) setResults((prev) => ({ ...prev, [idx]: d as Res })); })
+      .then((d) => {
+        if (my === runId.current) {
+          setResults((prev) => ({ ...prev, [idx]: d as Res }));
+          const sp = speedupOf(d as Res);
+          if (sp != null) {
+            recordRun({ speedup: sp });
+            const pred = predict[idx];
+            if (pred) recordPredict(bucketOf(sp) === pred);
+          }
+        }
+      })
       .catch((e) => { if (my === runId.current) setResults((prev) => ({ ...prev, [idx]: { error: "network", message: String((e as Error)?.message || e) } })); })
       .finally(() => { if (my === runId.current) { setRunning(null); setPhase(null); } });
   }

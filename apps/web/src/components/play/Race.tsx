@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fmt } from "@vhpce/profile-schema";
 import { runJob } from "../../lib/runner";
+import { recordRace } from "../../lib/badges";
 import { MATCHUPS, type Racer } from "./race-matchups";
 
 type Time = { t1: number; t24: number };
@@ -37,6 +38,7 @@ export default function Race({ runnerOk }: { runnerOk: boolean }) {
       const a = await timeOf(m.a.source);   // sequential: the gateway runs one job at a time
       const b = await timeOf(m.b.source);
       setRes({ a, b });
+      recordRace();
       setPhase("racing");
     } catch (e) {
       setErr(String((e as Error)?.message || e));
