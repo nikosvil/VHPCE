@@ -5,6 +5,7 @@ import Link from "next/link";
 import { drawScaling } from "@vhpce/viz";
 import { fmt } from "@vhpce/profile-schema";
 import { health, runJob, type Phase } from "../lib/runner";
+import { PRED_BUCKETS, bucketOf, bucketLabel } from "../lib/buckets";
 import { EXAMPLES } from "./playground-examples";
 
 // A hands-on "New to HPC? Start here" path: three runs on real cores that tell one story —
@@ -86,6 +87,7 @@ function toScaling(points: { p: number; ms: number }[]) {
 export default function FirstRun() {
   const [step, setStep] = useState(0);
   const [runnerOk, setRunnerOk] = useState(false);
+  const [predict, setPredict] = useState<Record<number, string>>({});
   const [results, setResults] = useState<Record<number, Res>>({});
   const [running, setRunning] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase | null>(null);
@@ -152,6 +154,14 @@ export default function FirstRun() {
           <div className="code">
             {codeLines.map((ln, i) => <div key={i} className="ln">{ln || " "}</div>)}
           </div>
+          <div className="pg-predict">
+            <span className="pg-predict-q">🔮 First, predict: speedup on 24 cores?</span>
+            <div className="seg fix">
+              {PRED_BUCKETS.map((b) => (
+                <button key={b.id} className={predict[step] === b.id ? "on" : ""} onClick={() => setPredict((p) => ({ ...p, [step]: b.id }))}>{b.label}</button>
+              ))}
+            </div>
+          </div>
           <div className="fr-runrow">
             <button className="pg-run" disabled={!runnerOk || isRunning} onClick={run}>
               {isRunning ? (phase === "queued" ? "Queued…" : "Running on 24 cores…") : res?.points ? "Run again ▸" : "Run on 24 cores ▸"}
@@ -179,6 +189,12 @@ export default function FirstRun() {
                 <div className="cap">speedup on {res.cores ?? 24} cores</div>
               </div>
               <div className="chart" style={{ marginTop: 8 }}><svg ref={svgRef} /></div>
+              {predict[step] && (
+                <div className={"pg-reveal " + (bucketOf(sp ?? 0) === predict[step] ? "hit" : "miss")} style={{ marginTop: 12 }}>
+                  {bucketOf(sp ?? 0) === predict[step] ? "✓ Nice call — " : "✗ Not what you guessed — "}
+                  you predicted <b>{bucketLabel(predict[step])}</b>; measured <b>{fmt(sp ?? 0, 1)}×</b> ({bucketLabel(bucketOf(sp ?? 0))}).
+                </div>
+              )}
               <div className={"eb " + (sp && sp > 4 ? "exp" : "why")} style={{ marginTop: 12 }}>
                 <div className="t">What you just saw</div>
                 <div className="body">{s.verdict(sp)}</div>

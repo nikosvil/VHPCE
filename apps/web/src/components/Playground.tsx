@@ -6,6 +6,7 @@ import Editor from "@monaco-editor/react";
 import { drawScaling } from "@vhpce/viz";
 import { fmt } from "@vhpce/profile-schema";
 import { health, runJob, type Phase } from "../lib/runner";
+import { PRED_BUCKETS, bucketOf, bucketLabel } from "../lib/buckets";
 import { EXAMPLES, type Example } from "./playground-examples";
 import Term from "./Term";
 import { GLOSSARY } from "./glossary";
@@ -18,16 +19,6 @@ const termify = (label: string) =>
   GLOSSARY[label.toLowerCase()] ? <Term k={label.toLowerCase()}>{label}</Term> : label;
 
 const STARTER = EXAMPLES[0].source;   // the gentlest example — the default starting point
-
-// Predict-before-you-run: the learner commits to a speedup bucket, then sees reality.
-const PRED_BUCKETS = [
-  { id: "slower", label: "Slower (<1×)" },
-  { id: "none", label: "No help (≈1×)" },
-  { id: "partial", label: "Partial (a few×)" },
-  { id: "strong", label: "Strong (15×+)" },
-];
-const bucketOf = (sp: number) => (sp < 1 ? "slower" : sp < 3 ? "none" : sp < 12 ? "partial" : "strong");
-const bucketLabel = (id: string) => PRED_BUCKETS.find((b) => b.id === id)?.label ?? id;
 
 type Point = { p: number; ms: number };
 type Cache = { d1MissPct?: number; lldMissPct?: number; llMissPct?: number; irefs?: number; error?: string };
