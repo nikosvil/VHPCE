@@ -2,12 +2,14 @@
  *   occupancy   : register pressure caps warps/SM (light vs heavy). argv[2] = light|heavy.
  *   coalesce    : strided global access wastes memory bandwidth (stride sweep 1..32).
  *   divergence  : divergent branches within a warp serialize execution (paths sweep 1..32).
+ *   atomics     : global-atomic contention — many threads hammering few counters serialize;
+ *                 spreading the updates across more targets recovers throughput (targets 1..4096).
  *
  * Each emits one JSON object on stdout matching the RunnerData seam:
  *   {"exp":..,"variant":..,"points":[{"p":<x>,"ms":..[,"occ"|"gbps"|...]}], "sm":..,"cc":..}
  *
  * Build: nvcc -O2 -arch=sm_120 occupancy.cu -o occupancy   (PTX-JIT fallback: compute_90)
- * Run:   occupancy <occupancy|coalesce|divergence> [variant]
+ * Run:   occupancy <occupancy|coalesce|divergence|atomics> [variant]
  */
 #include <cstdio>
 #include <cstring>
@@ -71,6 +73,16 @@ __global__ void k_diverge(const float *in, float *out, int n, int D, int work) {
         if (branch == b) { for (int k = 0; k < work; k++) a = a * 0.9999998f + 1.0e-6f; }
     }
     out[t] = a;
+}
+
+/* ----- atomics kernel: every thread does `reps` atomicAdds to counters[tid % ntargets].
+ *       ntargets=1 funnels ALL threads through one address (serialized in the L2 atomic unit);
+ *       more targets spread the traffic so updates proceed in parallel -> time drops. ----- */
+__global__ void k_atomics(unsigned long long *counters, int n, int ntargets, int reps) {
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= n) return;
+    int idx = t % ntargets;
+    for (int r = 0; r < reps; r++) atomicAdd(&counters[idx], 1ULL);
 }
 
 static void run_occupancy(const cudaDeviceProp &prop, const char *variant) {
@@ -145,6 +157,27 @@ static void run_divergence(const cudaDeviceProp &prop) {
     cudaFree(din); cudaFree(dout); cudaEventDestroy(t0); cudaEventDestroy(t1);
 }
 
+static void run_atomics(const cudaDeviceProp &prop) {
+    const int N = 1 << 19, REPSA = 16, B = 256, grid = (N + B - 1) / B, MAXT = 4096;
+    static const int ATOM[] = {1, 4, 16, 64, 256, 1024, 4096};
+    unsigned long long *dc = nullptr;
+    cudaMalloc(&dc, (size_t)MAXT * sizeof(unsigned long long));
+    cudaEvent_t t0, t1; cudaEventCreate(&t0); cudaEventCreate(&t1);
+    printf("{\"exp\":\"cuda-atomics\",\"variant\":\"add\",\"points\":[");
+    int first = 1;
+    for (int s = 0; s < 7; s++) {
+        int T = ATOM[s];
+        cudaMemset(dc, 0, (size_t)MAXT * sizeof(unsigned long long));
+        k_atomics<<<grid, B>>>(dc, N, T, REPSA); cudaDeviceSynchronize();
+        float best = 1e30f;
+        for (int r = 0; r < REPS; r++) { cudaEventRecord(t0); k_atomics<<<grid, B>>>(dc, N, T, REPSA); cudaEventRecord(t1); cudaEventSynchronize(t1); float ms = 0.f; cudaEventElapsedTime(&ms, t0, t1); if (ms < best) best = ms; }
+        if (cudaGetLastError() != cudaSuccess) continue;
+        printf("%s{\"p\":%d,\"ms\":%.4f}", first ? "" : ",", T, best); first = 0; fflush(stdout);
+    }
+    printf("],\"sm\":\"%s\",\"cc\":\"%d.%d\"}\n", prop.name, prop.major, prop.minor);
+    cudaFree(dc); cudaEventDestroy(t0); cudaEventDestroy(t1);
+}
+
 int main(int argc, char **argv) {
     const char *experiment = (argc > 1) ? argv[1] : "occupancy";
     const char *variant = (argc > 2) ? argv[2] : "heavy";
@@ -154,6 +187,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(experiment, "coalesce") == 0) run_coalesce(prop);
     else if (strcmp(experiment, "divergence") == 0) run_divergence(prop);
+    else if (strcmp(experiment, "atomics") == 0) run_atomics(prop);
     else run_occupancy(prop, variant);
     return 0;
 }
