@@ -35,6 +35,14 @@ export function drawScaling(svgEl: SVGSVGElement, res: ExperimentResult): void {
   const cur = res.current;
   svg.append("line").attr("x1", x(cur.x)).attr("x2", x(cur.x)).attr("y1", m.t).attr("y2", H - m.b).attr("stroke", "#2a3850").attr("stroke-dasharray", "3 3");
   svg.append("circle").attr("cx", x(cur.x)).attr("cy", y(cur.speedup)).attr("r", 5).attr("fill", C.accent).attr("stroke", "#04121a").attr("stroke-width", 2);
+  // optional thread-count focus marker (Playground explorer): a highlighted point the user picked
+  if (res.focusX != null) {
+    const fp = sw.find((s) => s.x === res.focusX);
+    if (fp) {
+      svg.append("line").attr("x1", x(fp.x)).attr("x2", x(fp.x)).attr("y1", m.t).attr("y2", H - m.b).attr("stroke", C.accent2).attr("stroke-width", 1.5).attr("stroke-dasharray", "2 3").attr("opacity", 0.8);
+      svg.append("circle").attr("cx", x(fp.x)).attr("cy", y(fp.speedup)).attr("r", 7).attr("fill", "none").attr("stroke", C.accent2).attr("stroke-width", 2.5);
+    }
+  }
   svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(6).tickFormat(d3.format("d")) as any);
   svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5) as any);
   svg.append("g").attr("class", "axis").attr("transform", `translate(${W - m.r},0)`).call(d3.axisRight(ye).ticks(4).tickFormat(d3.format(".0%")) as any);

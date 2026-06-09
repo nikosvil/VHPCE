@@ -60,6 +60,25 @@ function heroColor(e: number) {
   return e > 0.7 ? "var(--good)" : e > 0.4 ? "var(--warn)" : "var(--bad)";
 }
 
+// Thread-count explorer: pick a measured count and explain what that choice does to the run.
+function threadEffect(r: ReturnType<typeof buildResult>, focusX: number) {
+  const sw = r.sweep;
+  const fp = sw.find((s) => s.x === focusX) ?? r.current;
+  const idx = sw.indexOf(fp), prev = idx > 0 ? sw[idx - 1] : null;
+  let note: string;
+  if (fp.x === 1) note = "One thread — the serial baseline every speedup is measured against.";
+  else if (fp.x > r.peak.x && fp.speedup < r.peak.speedup * 0.97)
+    note = `Past the sweet spot: beyond ~${r.peak.x} threads this kernel gets no faster — the extra cores just add contention or wait on memory.`;
+  else if (prev) {
+    const gained = fp.speedup - prev.speedup;
+    const perThread = gained / (fp.x - prev.x);
+    if (perThread > 0.55) note = `Scaling well — going ${prev.x}→${fp.x} threads added +${fmt(gained, 1)}×, so most of the extra cores are paying off.`;
+    else if (gained < 0.2) note = `Diminishing returns — ${prev.x}→${fp.x} threads added only +${fmt(gained, 1)}×; you're near this kernel's limit.`;
+    else note = `Partial gains — ${prev.x}→${fp.x} threads added +${fmt(gained, 1)}×, but efficiency is sliding as coordination overhead grows.`;
+  } else note = "";
+  return { fp, note };
+}
+
 // Plain-language verdict + a "what now?" link to the Flagship experiment that isolates the cause.
 type Dx = { tone: string; headline: string; next: { label: string; href: string } };
 function diagnose(r: ReturnType<typeof buildResult>, cache?: Cache): Dx {
@@ -94,6 +113,7 @@ export default function Playground() {
   const [source, setSource] = useState(STARTER);
   const [activeEx, setActiveEx] = useState<Example | null>(EXAMPLES[0]);
   const [predict, setPredict] = useState<string | null>(null);
+  const [focus, setFocus] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<Phase | null>(null);
   const [data, setData] = useState<RunData | null>(null);
@@ -119,10 +139,13 @@ export default function Playground() {
 
   const points = data?.points || null;
   const result = points && points.length ? buildResult(points) : null;
+  // thread-count explorer: which measured count is in focus (defaults to the full run, max threads)
+  const focusX = result ? (focus ?? result.current.x) : null;
+  const te = result && focusX != null ? threadEffect(result, focusX) : null;
 
   useEffect(() => {
-    if (result && svgRef.current) drawScaling(svgRef.current, result as never);
-  }, [result]);
+    if (result && svgRef.current) drawScaling(svgRef.current, { ...result, focusX } as never);
+  }, [result, focusX]);
 
   async function run() {
     if (running) return;
@@ -248,6 +271,19 @@ export default function Playground() {
                 ))}
               </div>
               <div className="chart" style={{ marginTop: 12 }}><svg ref={svgRef} /></div>
+              {te && (
+                <div className="pg-threads">
+                  <div className="pg-threads-label">🧵 Explore thread count — how many cores actually help?</div>
+                  <div className="seg fix">
+                    {result.sweep.map((s) => (
+                      <button key={s.x} className={focusX === s.x ? "on" : ""} onClick={() => setFocus(s.x)}>{s.x}</button>
+                    ))}
+                  </div>
+                  <div className="pg-threads-read">
+                    At <b>{te.fp.x} thread{te.fp.x > 1 ? "s" : ""}</b>: <b style={{ color: heroColor(te.fp.efficiency) }}>{fmt(te.fp.speedup, 1)}×</b> speedup · {fmt(te.fp.efficiency * 100, 0)}% efficiency. {te.note}
+                  </div>
+                </div>
+              )}
               {(() => {
                 const dx = diagnose(result, data?.cache);
                 return (
