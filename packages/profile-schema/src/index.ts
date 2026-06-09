@@ -50,6 +50,8 @@ export interface ExperimentResult {
   xUnits?: "threads" | "ranks" | "block";
   /** free-form x-axis label for the generic GPU sweep chart (e.g. "stride", "divergent paths"). */
   xLabel?: string;
+  /** optional sweep x to highlight on the scaling chart (the Playground's thread-count explorer). */
+  focusX?: number;
 
   // experiment-specific extras (optional; populated per experiment)
   peak?: SweepPoint;
