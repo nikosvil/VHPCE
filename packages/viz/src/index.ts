@@ -99,7 +99,7 @@ export function drawOverlay(svgEl: SVGSVGElement, model: ExperimentResult, measu
   const svg = d3.select(svgEl);
   svg.selectAll("*").remove();
   const W = svgEl.clientWidth || 560, H = svgEl.clientHeight || 280, m = { t: 16, r: 18, b: 42, l: 52 };
-  const logX = model.experimentId === "cudaCoalesce" || model.experimentId === "cudaDivergence" || model.experimentId === "cuda";
+  const logX = model.experimentId === "cudaCoalesce" || model.experimentId === "cudaDivergence" || model.experimentId === "cudaAtomics" || model.experimentId === "cuda";
   const useOcc = model.sweep.some((p) => p.occ != null);
   const yPick = (p: SweepPoint) => (useOcc ? (p.occ ?? p.efficiency) : p.efficiency);
   const allX = model.sweep.map((p) => p.x);
@@ -482,4 +482,45 @@ const divergence: SceneFn = (ctx, VW, VH, now, res) => {
   );
 };
 
-export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo, cuda, cudaCoalesce: coalesce, cudaDivergence: divergence };
+// Atomic contention: 16 representative threads each atomicAdd to counters[thread % targets].
+// targets=1 funnels every thread onto one cell — a deep serial queue; more cells spread the
+// traffic so updates proceed in parallel. The per-cell "×N" badge is the queue depth.
+const atomics: SceneFn = (ctx, VW, VH, now, res) => {
+  const T = Math.max(1, Math.round(res.current.x));
+  const eff = res.current.efficiency ?? 0;
+  const col = eff > 0.6 ? C.good : eff > 0.3 ? C.warn : C.bad;
+  const NT = 16, cells = Math.min(T, 8), pad = 26;
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(T === 1 ? "16 threads · ONE atomic counter — every update queues (serialized)" : `16 threads · ${cells === T ? T : cells + "+"} counters — updates spread across atomic units`, VW / 2, 18);
+
+  const ty = 34, th = 18, ww = VW - pad * 2, cw = ww / NT;
+  for (let i = 0; i < NT; i++) {
+    const x = pad + i * cw; rr(ctx, x + 1, ty, cw - 2, th, 3);
+    ctx.fillStyle = col; ctx.globalAlpha = 0.35 + 0.35 * Math.abs(Math.sin(now / 300 + i * 0.4)); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.lineWidth = 1; ctx.strokeStyle = col; ctx.stroke();
+  }
+  ctx.fillStyle = C.dim; ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "left"; ctx.fillText("threads", pad, ty - 4);
+
+  const cy = VH - 64, ch = 34, cgap = 8, cellW = (ww - (cells - 1) * cgap) / cells;
+  for (let c = 0; c < cells; c++) {
+    const cx = pad + c * (cellW + cgap);
+    let load = 0; for (let i = 0; i < NT; i++) if ((i % cells) === c) load++;
+    const cellCol = load > 4 ? C.bad : load > 1 ? C.warn : C.good;
+    for (let i = 0; i < NT; i++) if ((i % cells) === c) {
+      const sx = pad + i * cw + cw / 2;
+      ctx.strokeStyle = load > 4 ? "rgba(255,93,115,.35)" : load > 1 ? "rgba(255,180,84,.3)" : "rgba(61,220,151,.3)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(sx, ty + th); ctx.lineTo(cx + cellW / 2, cy); ctx.stroke();
+    }
+    rr(ctx, cx, cy, cellW, ch, 7); ctx.fillStyle = "#0b1119"; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = cellCol; ctx.stroke();
+    ctx.fillStyle = cellCol; ctx.font = "600 11px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("c" + c, cx + cellW / 2, cy + ch / 2); ctx.textBaseline = "alphabetic";
+    if (load > 1) { ctx.fillStyle = cellCol; ctx.font = "600 10px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.fillText("×" + load + " queue", cx + cellW / 2, cy - 6); }
+  }
+  ctx.fillStyle = col; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    T === 1 ? "all updates serialize on one address — the atomic unit is the bottleneck"
+            : `${Math.round(eff * 100)}% of peak throughput — ${fmt(res.factor ?? 1, 1)}× off the spread-wide best`,
+    VW / 2, cy + ch + 22,
+  );
+};
+
+export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo, cuda, cudaCoalesce: coalesce, cudaDivergence: divergence, cudaAtomics: atomics };

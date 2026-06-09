@@ -153,6 +153,24 @@ export const Explain: Record<string, ExplainFn> = {
       exp: `Collapse the paths back toward 1 and the warp re-converges — the serialized passes disappear and throughput recovers.`,
     };
   },
+  cudaAtomics(r) {
+    const T = r.current.x, eff = (r.current.efficiency ?? 0) * 100, slow = r.factor ?? 1 / (r.current.efficiency || 1);
+    if (T === 1)
+      return {
+        sev: "critical",
+        what: `<b>One atomic target</b>: every thread does <code>atomicAdd</code> on the <b>same</b> address, so all the updates serialize at the L2 atomic unit — <b>${fmt(slow, 1)}× slower</b> than spreading them.`,
+        why: `Atomics on one location must apply one-at-a-time to stay correct. With thousands of threads funneled through a single address, the hardware queues them — throughput collapses to that one unit's rate.`,
+        how: `<b>Privatize the updates.</b> Accumulate into per-block <code>__shared__</code> counters (or many per-bin counters) and do just one global <code>atomicAdd</code> per block at the end — a hierarchical reduction.`,
+        exp: `Spread the updates across more targets and the time falls steeply — until contention is gone and you hit the bandwidth/launch floor.`,
+      };
+    return {
+      sev: eff > 60 ? "info" : "warn",
+      what: `<b>${T} atomic targets</b>: the updates spread across ${T} addresses, so they proceed largely in parallel — <b>${fmt(eff, 0)}%</b> of peak throughput${slow > 1.5 ? `, still ${fmt(slow, 1)}× off the best` : ""}.`,
+      why: `Distributing atomics over many locations lets independent atomic units work concurrently instead of queuing on one address. Throughput rises until something else (memory bandwidth, launch overhead) becomes the limit.`,
+      how: `${eff > 80 ? "Already well-spread." : "Spread wider still"} — or, for a true sum, finish with a tree/shared-memory reduction so the final combine costs almost nothing.`,
+      exp: `Drop back toward one target and watch the time climb steeply as contention returns.`,
+    };
+  },
 };
 
 export const ExplainMeasured: Record<string, ExplainFn> = {
@@ -295,6 +313,25 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `The warp shares one program counter, so the hardware serializes the ${D} branch paths into ${D} masked passes. The measured slowdown is the cost of those idle lane-cycles on real silicon.`,
       how: `Restructure so a whole warp takes one branch (sort/bin by condition), or go branchless with predication so there's nothing to serialize.`,
       exp: `Reduce the paths back toward 1 and the measured time drops as the warp re-converges.`,
+    };
+  },
+  cudaAtomics(r) {
+    const T = r.current.x, eff = (r.current.efficiency ?? 0) * 100, slow = r.factor ?? 1 / (r.current.efficiency || 1);
+    const dev = r.smName || "the GPU";
+    if (T === 1)
+      return {
+        sev: "critical",
+        what: `Measured on ${dev}: funneling every thread's <code>atomicAdd</code> through <b>one address</b> runs <b>${fmt(slow, 1)}× slower</b> than spreading the updates — pure serialization.`,
+        why: `All atomic updates to a single location queue at one L2 atomic unit. The measured slowdown is thousands of threads waiting their turn on real silicon.`,
+        how: `Accumulate into per-block <code>__shared__</code> counters (or per-bin private counters), then one global <code>atomicAdd</code> per block — hierarchical reduction.`,
+        exp: `Increase the targets and the measured time drops sharply until contention disappears.`,
+      };
+    return {
+      sev: eff > 60 ? "info" : "warn",
+      what: `Measured on ${dev}: <b>${T} targets</b> reach <b>${fmt(eff, 0)}%</b> of the best throughput${slow > 1.5 ? ` (${fmt(slow, 1)}× off)` : ""} — the atomic traffic now spreads across many units.`,
+      why: `With the updates distributed, independent atomic units run concurrently instead of queuing. Throughput keeps climbing until memory bandwidth or launch overhead caps it.`,
+      how: `${eff > 80 ? "Well spread already" : "Spread wider"}; for a real total, finish with a shared-memory/tree reduction so the global combine is nearly free.`,
+      exp: `Collapse back toward one target and the measured time climbs steeply as contention returns.`,
     };
   },
 };

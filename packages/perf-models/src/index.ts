@@ -76,9 +76,11 @@ export const EXPERIMENTS = [
   { id: "cuda", name: "GPU Occupancy", scene: "warps · SMs · register pressure" },
   { id: "cudaCoalesce", name: "GPU Coalescing", scene: "warp · memory transactions" },
   { id: "cudaDivergence", name: "GPU Divergence", scene: "warp · serialized branch paths" },
+  { id: "cudaAtomics", name: "GPU Atomics", scene: "warps · atomic contention" },
 ];
 
 export const GPU_SWEEP = [1, 2, 4, 8, 16, 32];
+export const ATOM_SWEEP = [1, 4, 16, 64, 256, 1024, 4096];
 
 // MPI halo model: compute that scales with ranks + a communication term that grows ~log(ranks).
 export const HALO = { T1: 1000, Tc0: 8, Tc1: 18 };
@@ -279,6 +281,23 @@ export const Models: Record<string, (p: any) => ExperimentResult> = {
       ],
     } as ExperimentResult;
   },
+  cudaAtomics(params) {
+    const C = 120;   // contention constant: efficiency saturates as targets approach ~1k
+    const sweep: SweepPoint[] = ATOM_SWEEP.map((T) => { const eff = 1 / (1 + C / T); return { x: T, time: 1 / eff, speedup: eff, efficiency: eff }; });
+    const cur = sweep.find((s) => s.x === params.targets) || sweep[0];
+    const slow = 1 / cur.efficiency, eff = cur.efficiency;
+    return {
+      experimentId: "cudaAtomics", source: "model", referenceMachine: REF.id, params,
+      sweep, current: cur, xLabel: "distinct atomic targets (1 = a single shared counter)", util: eff, factor: slow,
+      metrics: [
+        { k: "Atomic targets", v: cur.x + (cur.x === 1 ? " (one counter)" : ""), tone: cur.x === 1 ? "bad" : cur.x < 16 ? "warn" : "good" },
+        { k: "Throughput retained", v: fmt(eff * 100, 0) + "%", tone: eff > 0.6 ? "good" : eff > 0.3 ? "warn" : "bad" },
+        { k: "Slowdown vs spread", v: fmt(slow, 1) + "×", tone: slow < 2 ? "good" : slow < 8 ? "warn" : "bad" },
+        { k: "Contention", v: cur.x === 1 ? "maximal" : cur.x < 64 ? "high" : cur.x < 1024 ? "moderate" : "low", tone: cur.x >= 1024 ? "good" : cur.x >= 64 ? "warn" : "bad" },
+        { k: "Best", v: "spread wide", tone: "accent" },
+      ],
+    } as ExperimentResult;
+  },
 };
 
 /* ===================== Producer B — measured adapters ===================== */
@@ -446,6 +465,26 @@ export const Measured: Record<string, (p: any, data: RunnerData) => ExperimentRe
         { k: "Kernel time", v: fmt(curPt?.ms ?? 0, 2) + " ms", tone: "" },
         { k: "Active lanes (avg)", v: fmt(active, 0) + "%", tone: active > 50 ? "good" : active > 20 ? "warn" : "bad" },
         { k: "Lanes idled", v: fmt(100 - active, 0) + "%", tone: 100 - active < 30 ? "good" : "bad" },
+      ],
+    } as ExperimentResult;
+  },
+  cudaAtomics(params, data) {
+    const meta = data as RunnerData & { sm?: string };
+    const pts = data.points;
+    const tbest = Math.min(...pts.map((p) => p.ms)) || 1;   // fastest = most spread out
+    const sweep: SweepPoint[] = pts.map((pt) => ({ x: pt.p, time: pt.ms, speedup: tbest / pt.ms, efficiency: tbest / pt.ms }));
+    const cur = sweep.find((s) => s.x === params.targets) || sweep[0];
+    const curPt = pts[sweep.indexOf(cur)] ?? pts[0];
+    const slow = (curPt?.ms ?? tbest) / tbest, eff = cur.efficiency;
+    return {
+      experimentId: "cudaAtomics", source: "measured", referenceMachine: REF.id, params,
+      sweep, current: cur, xLabel: "distinct atomic targets (1 = a single shared counter)", util: eff, factor: slow, smName: meta.sm,
+      metrics: [
+        { k: "Atomic targets", v: cur.x + (cur.x === 1 ? " (one counter)" : ""), tone: cur.x === 1 ? "bad" : cur.x < 16 ? "warn" : "good" },
+        { k: "Kernel time", v: fmt(curPt?.ms ?? 0, 3) + " ms", tone: "" },
+        { k: "Throughput retained", v: fmt(eff * 100, 0) + "%", tone: eff > 0.6 ? "good" : eff > 0.3 ? "warn" : "bad" },
+        { k: "Slowdown vs spread", v: fmt(slow, 1) + "×", tone: slow < 2 ? "good" : slow < 8 ? "warn" : "bad" },
+        { k: "Fastest (meas.)", v: fmt(tbest, 3) + " ms", tone: "accent" },
       ],
     } as ExperimentResult;
   },

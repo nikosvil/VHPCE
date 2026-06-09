@@ -7,7 +7,7 @@ import { drawOverlay } from "@vhpce/viz";
 import { fmt, type RunnerData, type SweepPoint } from "@vhpce/profile-schema";
 import { health, runJob, type JobBody } from "../lib/runner";
 
-type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda" | "cudaCoalesce" | "cudaDivergence";
+type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda" | "cudaCoalesce" | "cudaDivergence" | "cudaAtomics";
 type Params = Record<string, number | string | boolean>;
 
 // Same kernel for both producers: bandwidth's model AI is pinned to the real triad so the model
@@ -21,6 +21,7 @@ const DEFAULT_PARAMS: Record<ExpId, Params> = {
   cuda: { blockSize: 256, variant: "heavy" },
   cudaCoalesce: { stride: 8 },
   cudaDivergence: { paths: 8 },
+  cudaAtomics: { targets: 1 },
 };
 
 // The scenario knob that reshapes the curve (and so the divergence) for each experiment.
@@ -42,16 +43,17 @@ const MODEL_GAP: Record<ExpId, string> = {
   cuda: "Occupancy is modelled purely from register/block resource limits; the measured value also reflects the launch configuration and how the scheduler actually packs warps.",
   cudaCoalesce: "The model assumes efficiency = 1/stride. The L2 cache softens the penalty at small strides, so the silicon BEATS the napkin model there — the gap is the cache doing you a favour.",
   cudaDivergence: "The model predicts 1/paths. Measured warp replay tracks it almost exactly — a case where the simple model nails reality, and the near-zero gap is itself the lesson.",
+  cudaAtomics: "The model assumes contention falls smoothly as 1/(1+C/targets). Real atomic hardware has its own queueing and L2 behaviour, so the measured curve drops faster at first and plateaus once the atomic units saturate — the gap is the hardware's contention handling.",
 };
 
 function jobFor(exp: ExpId, cp: Params): { key: string; body: JobBody } {
   const isMpi = exp === "mpiHalo", isCuda = exp === "cuda";
-  const isCoalesce = exp === "cudaCoalesce", isDiverge = exp === "cudaDivergence";
-  const cudaExp = isDiverge ? "divergence" : isCoalesce ? "coalesce" : "occupancy";
+  const isCoalesce = exp === "cudaCoalesce", isDiverge = exp === "cudaDivergence", isAtomics = exp === "cudaAtomics";
+  const cudaExp = isDiverge ? "divergence" : isCoalesce ? "coalesce" : isAtomics ? "atomics" : "occupancy";
   const { bexp, variant } = runnerSpec(exp, cp);
-  const key = isDiverge ? "cuda/divergence" : isCoalesce ? "cuda/coalesce"
+  const key = isDiverge ? "cuda/divergence" : isCoalesce ? "cuda/coalesce" : isAtomics ? "cuda/atomics"
     : isCuda ? "cuda/" + cp.variant : isMpi ? "mpi/" + cp.mode : bexp + "/" + variant;
-  const body: JobBody = (isCuda || isCoalesce || isDiverge)
+  const body: JobBody = (isCuda || isCoalesce || isDiverge || isAtomics)
     ? { kind: "cuda", experiment: cudaExp, variant: (cp.variant as string) ?? "heavy" }
     : isMpi
       ? { kind: "mpi", variant: cp.mode as string, maxranks: MAXP }

@@ -9,6 +9,7 @@ import MpiScene3D from "./scenes/MpiScene3D";
 import CudaScene3D from "./scenes/CudaScene3D";
 import CoalesceScene3D from "./scenes/CoalesceScene3D";
 import DivergenceScene3D from "./scenes/DivergenceScene3D";
+import AtomicsScene3D from "./scenes/AtomicsScene3D";
 import AskAI from "./AskAI";
 import {
   Models, Measured, runnerSpec, EXPERIMENTS, MAXP, TRIAD_AI,
@@ -33,6 +34,7 @@ const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null 
   cuda: CudaScene3D,
   cudaCoalesce: CoalesceScene3D,
   cudaDivergence: DivergenceScene3D,
+  cudaAtomics: AtomicsScene3D,
 };
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, "");
@@ -50,7 +52,9 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
         ? `Current point: stride ${c.x} — achieved bandwidth ${fmt(r.bw ?? 0, 0)} GB/s = ${fmt(c.efficiency * 100, 0)}% of the coalesced (stride-1) peak; ${fmt((1 - c.efficiency) * 100, 0)}% of fetched bandwidth wasted.`
         : r.experimentId === "cudaDivergence"
           ? `Current point: ${c.x} divergent path${c.x > 1 ? "s" : ""} — warp runs ${fmt(r.factor ?? 1 / (c.efficiency || 1), 1)}× slower than uniform; ~${fmt(c.efficiency * 100, 0)}% of lanes active per pass (${fmt((1 - c.efficiency) * 100, 0)}% of lane-cycles idle).`
-          : `Current point: ${c.x} of 24 ${r.xUnits === "ranks" ? "ranks" : "threads"} — speedup ${fmt(c.speedup, 2)}×, efficiency ${fmt(c.efficiency * 100, 0)}%.`,
+          : r.experimentId === "cudaAtomics"
+            ? `Current point: ${c.x} atomic target${c.x > 1 ? "s" : ""} — ${fmt(c.efficiency * 100, 0)}% of peak atomic throughput, ${fmt(r.factor ?? 1 / (c.efficiency || 1), 1)}× off the spread-wide best (1 target = all threads serialized on one address).`
+            : `Current point: ${c.x} of 24 ${r.xUnits === "ranks" ? "ranks" : "threads"} — speedup ${fmt(c.speedup, 2)}×, efficiency ${fmt(c.efficiency * 100, 0)}%.`,
     `On-screen metrics: ${metrics}.`,
     `Deterministic finding:`,
     `- What: ${stripHtml(e.what)}`,
@@ -60,7 +64,7 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
   ].join("\n");
 }
 
-type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda" | "cudaCoalesce" | "cudaDivergence";
+type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda" | "cudaCoalesce" | "cudaDivergence" | "cudaAtomics";
 type Mode = "model" | "measured";
 
 const DEFAULT_PARAMS: Record<ExpId, any> = {
@@ -72,9 +76,11 @@ const DEFAULT_PARAMS: Record<ExpId, any> = {
   cuda: { blockSize: 256, variant: "heavy" },
   cudaCoalesce: { stride: 8 },
   cudaDivergence: { paths: 8 },
+  cudaAtomics: { targets: 1 },
 };
 
 const STRIDES = [1, 2, 4, 8, 16, 32];
+const ATOMS = [1, 4, 16, 64, 256, 1024, 4096];
 
 export default function Flagship() {
   const [exp, setExp] = useState<ExpId>("falseSharing");
@@ -101,7 +107,8 @@ export default function Flagship() {
   const isCuda = exp === "cuda";
   const isCoalesce = exp === "cudaCoalesce";
   const isDiverge = exp === "cudaDivergence";
-  const cudaFam = isCuda || isCoalesce || isDiverge;
+  const isAtomics = exp === "cudaAtomics";
+  const cudaFam = isCuda || isCoalesce || isDiverge || isAtomics;
   const xKey = exp === "mpiHalo" ? "ranks" : "threads";   // degree-of-parallelism param
   const xLabel = exp === "mpiHalo" ? "Ranks" : "Threads";
   const xUnits = result?.xUnits === "ranks" ? "ranks" : "threads";
@@ -140,19 +147,21 @@ export default function Flagship() {
     const isCuda = exp === "cuda";
     const isCoalesce = exp === "cudaCoalesce";
     const isDiverge = exp === "cudaDivergence";
-    const cudaExp = isDiverge ? "divergence" : isCoalesce ? "coalesce" : "occupancy";
+    const isAtomics = exp === "cudaAtomics";
+    const cudaExp = isDiverge ? "divergence" : isCoalesce ? "coalesce" : isAtomics ? "atomics" : "occupancy";
     const { bexp, variant } = runnerSpec(exp, cp);
-    // The CUDA runner sweeps the whole stride/paths range in one pass, so coalesce & divergence
-    // cache by experiment only — moving the slider just re-selects a point from the same data.
+    // The CUDA runner sweeps the whole range in one pass, so the sweep experiments cache by
+    // experiment only — moving the slider just re-selects a point from the same measured data.
     const key = isDiverge ? "cuda/divergence"
       : isCoalesce ? "cuda/coalesce"
+      : isAtomics ? "cuda/atomics"
       : isCuda ? "cuda/" + cp.variant
       : isMpi ? "mpi/" + cp.mode
       : bexp + "/" + variant;
     const cached = cacheRef.current[key];
     if (cached) { setResult(Measured[exp](cp, cached)); return; }
     setLoading(true);
-    const body = isCuda || isCoalesce || isDiverge
+    const body = isCuda || isCoalesce || isDiverge || isAtomics
       ? { kind: "cuda" as const, experiment: cudaExp, variant: cp.variant ?? "heavy" }
       : isMpi
         ? { kind: "mpi" as const, variant: cp.mode, maxranks: MAXP }
@@ -179,7 +188,7 @@ export default function Flagship() {
     if (!result) return;
     if (scalingRef.current) {
       if (result.experimentId === "cuda") drawOccupancy(scalingRef.current, result);
-      else if (result.experimentId === "cudaCoalesce" || result.experimentId === "cudaDivergence") drawSweep(scalingRef.current, result);
+      else if (result.experimentId === "cudaCoalesce" || result.experimentId === "cudaDivergence" || result.experimentId === "cudaAtomics") drawSweep(scalingRef.current, result);
       else drawScaling(scalingRef.current, result);
     }
     if (result.experimentId === "bandwidth" && rooflineRef.current) drawRoofline(rooflineRef.current, result);
@@ -192,7 +201,7 @@ export default function Flagship() {
       if (!r) return;
       if (scalingRef.current) {
         if (r.experimentId === "cuda") drawOccupancy(scalingRef.current, r);
-        else if (r.experimentId === "cudaCoalesce" || r.experimentId === "cudaDivergence") drawSweep(scalingRef.current, r);
+        else if (r.experimentId === "cudaCoalesce" || r.experimentId === "cudaDivergence" || r.experimentId === "cudaAtomics") drawSweep(scalingRef.current, r);
         else drawScaling(scalingRef.current, r);
       }
       if (r.experimentId === "bandwidth" && rooflineRef.current) drawRoofline(rooflineRef.current, r);
@@ -422,6 +431,18 @@ export default function Flagship() {
               <div className="fixhint">The fix: keep branches <b>warp-uniform</b> (sort/bin by condition, or go branchless) so a <Term k="warp">warp</Term> takes one path and never serializes — no <Term k="warp divergence">divergence</Term>.</div>
             </div>
           )}
+
+          {exp === "cudaAtomics" && (
+            <div className="ctrl">
+              <label>Atomic targets<b>{p.targets === 1 ? "1 (one counter)" : p.targets}</b></label>
+              <div className="seg fix">
+                {ATOMS.map((t) => (
+                  <button key={t} className={p.targets === t ? "on" : ""} onClick={() => setParam({ targets: t })}>{t}</button>
+                ))}
+              </div>
+              <div className="fixhint">The fix: <b>privatize</b> the updates — accumulate in per-block <code>__shared__</code> counters, then one global <Term k="atomic">atomic</Term> per block. Fewer threads per address = far less contention.</div>
+            </div>
+          )}
         </section>
 
         <section className="card vizwrap">
@@ -447,6 +468,7 @@ export default function Flagship() {
                   ? isCuda ? fmt((result?.occupancy ?? cur.efficiency) * 100, 0) + "%"
                   : isCoalesce ? fmt(result?.bw ?? 0, 0)
                   : isDiverge ? fmt(result?.factor ?? 1 / (cur.efficiency || 1), 1) + "×"
+                  : isAtomics ? fmt(result?.factor ?? 1 / (cur.efficiency || 1), 1) + "×"
                   : fmt(cur.speedup, 1) + "×"
                   : "—"}
             </div>
@@ -457,8 +479,9 @@ export default function Flagship() {
                   ? isCuda ? `occupancy at ${cur.x} threads/block`
                     : isCoalesce ? `GB/s · stride ${cur.x} · ${fmt(cur.efficiency * 100, 0)}% of coalesced peak`
                     : isDiverge ? `slower than uniform · ${cur.x} path${cur.x > 1 ? "s" : ""} · ${fmt(cur.efficiency * 100, 0)}% lanes active`
+                    : isAtomics ? `slower than spread · ${cur.x} target${cur.x > 1 ? "s" : ""} · ${fmt(cur.efficiency * 100, 0)}% throughput`
                     : `speedup on ${cur.x} of 24 ${xUnits === "ranks" ? "ranks" : "cores"}`
-                  : (isCuda ? "occupancy" : isCoalesce ? "GB/s" : isDiverge ? "warp slowdown" : "speedup")}
+                  : (isCuda ? "occupancy" : isCoalesce ? "GB/s" : isDiverge ? "warp slowdown" : isAtomics ? "atomic slowdown" : "speedup")}
             </div>
           </div>
           <div>
@@ -478,7 +501,7 @@ export default function Flagship() {
 
       <div className="lower">
         <section className="card">
-          <h2>{isCuda ? "Occupancy · 32 → 1024 threads/block" : isCoalesce ? "Bandwidth efficiency · stride 1 → 32" : isDiverge ? "Throughput vs uniform · 1 → 32 paths" : `Scaling · 1 → ${MAXP} ${xUnits}`}</h2>
+          <h2>{isCuda ? "Occupancy · 32 → 1024 threads/block" : isCoalesce ? "Bandwidth efficiency · stride 1 → 32" : isDiverge ? "Throughput vs uniform · 1 → 32 paths" : isAtomics ? "Atomic throughput · 1 → 4096 targets" : `Scaling · 1 → ${MAXP} ${xUnits}`}</h2>
           <div className={"charts" + (exp === "bandwidth" ? " two" : "")}>
             <div className="chart">
               <svg ref={scalingRef} />
@@ -493,6 +516,11 @@ export default function Flagship() {
                   <>
                     <span><i style={{ borderColor: "var(--accent)" }} />bandwidth vs coalesced peak</span>
                     <span><i style={{ borderColor: "var(--accent2)" }} />stride points</span>
+                  </>
+                ) : isAtomics ? (
+                  <>
+                    <span><i style={{ borderColor: "var(--accent)" }} />throughput vs spread</span>
+                    <span><i style={{ borderColor: "var(--accent2)" }} />target points</span>
                   </>
                 ) : isDiverge ? (
                   <>
