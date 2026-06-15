@@ -1,0 +1,19 @@
+{
+  "name": "VHPCE",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "features": {
+    // Lets `docker compose` (Tier 1 / Measured mode) work inside Codespaces too.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "postCreateCommand": "corepack enable && pnpm install",
+  "forwardPorts": [3000, 8000],
+  "portsAttributes": {
+    "3000": { "label": "Web app (Next.js)", "onAutoForward": "openPreview" },
+    "8000": { "label": "Gateway API", "onAutoForward": "notify" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+    }
+  }
+}

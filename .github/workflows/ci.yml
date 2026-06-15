@@ -1,0 +1,34 @@
+name: CI
+
+# Tier-0 sanity check (no Docker/GPU needed): the web app must install, typecheck, lint, and
+# build cleanly on every push/PR. Measured-mode (Docker/CUDA) builds are not covered here —
+# see SETUP.md for those.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build web app
+        run: pnpm --filter web build
