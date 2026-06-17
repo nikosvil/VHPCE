@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import FalseSharingScene3D from "./scenes/FalseSharingScene3D";
 import SynchronizationScene3D from "./scenes/SynchronizationScene3D";
 import BandwidthScene3D from "./scenes/BandwidthScene3D";
@@ -67,7 +67,23 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
 type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda" | "cudaCoalesce" | "cudaDivergence" | "cudaAtomics";
 type Mode = "model" | "measured";
 
-const DEFAULT_PARAMS: Record<ExpId, any> = {
+// Union of every per-experiment params shape; each experiment only sets its own subset.
+type ExpParams = {
+  threads?: number;
+  ranks?: number;
+  padded?: boolean;
+  intensity?: number;
+  mode?: string;
+  ai?: number;
+  sched?: string;
+  blockSize?: number;
+  variant?: string;
+  stride?: number;
+  paths?: number;
+  targets?: number;
+};
+
+const DEFAULT_PARAMS: Record<ExpId, ExpParams> = {
   falseSharing: { threads: 24, padded: false, intensity: 1 },
   synchronization: { threads: 24, mode: "critical" },
   bandwidth: { threads: 24, ai: 0.1 },
@@ -86,8 +102,8 @@ export default function Flagship() {
   const [exp, setExp] = useState<ExpId>("falseSharing");
   const [mode, setMode] = useState<Mode>("model");
   const [view, setView] = useState<"2d" | "3d">("3d");
-  const [params, setParams] = useState<Record<ExpId, any>>(DEFAULT_PARAMS);
-  const [result, setResult] = useState<ExperimentResult | null>(null);
+  const [params, setParams] = useState<Record<ExpId, ExpParams>>(DEFAULT_PARAMS);
+  const [measuredResult, setMeasuredResult] = useState<ExperimentResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [runnerOk, setRunnerOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -98,7 +114,15 @@ export default function Flagship() {
   const resultRef = useRef<ExperimentResult | null>(null);
   const cacheRef = useRef<Record<string, RunnerData>>({});
   const tokenRef = useRef(0);
-  resultRef.current = result;
+
+  // Model results are pure functions of (exp, params), so compute them during render.
+  const modelResult = useMemo(() => Models[exp](params[exp]), [exp, params]);
+  const result = mode === "model" ? modelResult : measuredResult;
+  const showLoading = mode === "measured" && loading;
+
+  useEffect(() => {
+    resultRef.current = result;
+  }, [result]);
 
   const p = params[exp];
   const measured = mode === "measured";
@@ -114,7 +138,7 @@ export default function Flagship() {
   const xUnits = result?.xUnits === "ranks" ? "ranks" : "threads";
 
   const setParam = useCallback(
-    (patch: any) => setParams((prev) => ({ ...prev, [exp]: { ...prev[exp], ...patch } })),
+    (patch: Partial<ExpParams>) => setParams((prev) => ({ ...prev, [exp]: { ...prev[exp], ...patch } })),
     [exp],
   );
 
@@ -134,15 +158,11 @@ export default function Flagship() {
     if (e && e in DEFAULT_PARAMS) setExp(e as ExpId);
   }, []);
 
-  // Recompute on experiment / mode / params change (model = sync, measured = async fetch)
+  // Recompute on experiment / mode / params change (model = sync via useMemo above, measured = async fetch)
   useEffect(() => {
     const my = ++tokenRef.current;
+    if (mode === "model") return;
     const cp = params[exp];
-    if (mode === "model") {
-      setResult(Models[exp](cp));
-      setLoading(false);
-      return;
-    }
     const isMpi = exp === "mpiHalo";
     const isCuda = exp === "cuda";
     const isCoalesce = exp === "cudaCoalesce";
@@ -155,16 +175,16 @@ export default function Flagship() {
     const key = isDiverge ? "cuda/divergence"
       : isCoalesce ? "cuda/coalesce"
       : isAtomics ? "cuda/atomics"
-      : isCuda ? "cuda/" + cp.variant
-      : isMpi ? "mpi/" + cp.mode
+      : isCuda ? "cuda/" + (cp.variant ?? "")
+      : isMpi ? "mpi/" + (cp.mode ?? "")
       : bexp + "/" + variant;
     const cached = cacheRef.current[key];
-    if (cached) { setResult(Measured[exp](cp, cached)); return; }
+    if (cached) { setMeasuredResult(Measured[exp](cp, cached)); return; }
     setLoading(true);
     const body = isCuda || isCoalesce || isDiverge || isAtomics
       ? { kind: "cuda" as const, experiment: cudaExp, variant: cp.variant ?? "heavy" }
       : isMpi
-        ? { kind: "mpi" as const, variant: cp.mode, maxranks: MAXP }
+        ? { kind: "mpi" as const, variant: cp.mode ?? "strong", maxranks: MAXP }
         : { kind: "bench" as const, exp: bexp, variant, maxthreads: MAXP };
     runJob(body)
       .then((data) => {
@@ -173,7 +193,7 @@ export default function Flagship() {
         if (!d || d.error) throw new Error(d?.message || d?.error || "run failed");
         cacheRef.current[key] = d;
         setLoading(false);
-        setResult(Measured[exp](cp, d));
+        setMeasuredResult(Measured[exp](cp, d));
       })
       .catch((e) => {
         if (my !== tokenRef.current) return;
@@ -327,7 +347,7 @@ export default function Flagship() {
               </div>
               {!measured && (
                 <div className="ctrl">
-                  <label>Write intensity<b>×{fmt(p.intensity, 1)}</b></label>
+                  <label>Write intensity<b>×{fmt(p.intensity ?? 1, 1)}</b></label>
                   <input type="range" min={0.5} max={2} step={0.1} value={p.intensity}
                     onChange={(e) => setParam({ intensity: +e.target.value })} />
                 </div>
@@ -351,7 +371,7 @@ export default function Flagship() {
             <div className="ctrl">
               {!measured ? (
                 <>
-                  <label>Arithmetic intensity<b>{fmt(p.ai, 2)} F/B</b></label>
+                  <label>Arithmetic intensity<b>{fmt(p.ai ?? 0.1, 2)} F/B</b></label>
                   <input type="range" min={0.03} max={8} step={0.01} value={p.ai}
                     onChange={(e) => setParam({ ai: +e.target.value })} />
                   <div className="fixhint">The fix: raise <Term k="arithmetic intensity">arithmetic intensity</Term> (FLOPs per byte) to climb off the memory ceiling.</div>
@@ -463,7 +483,7 @@ export default function Flagship() {
           <h2>Live metrics</h2>
           <div className="hero">
             <div className="big" style={{ color: heroColor }}>
-              {loading ? "•••"
+              {showLoading ? "•••"
                 : cur
                   ? isCuda ? fmt((result?.occupancy ?? cur.efficiency) * 100, 0) + "%"
                   : isCoalesce ? fmt(result?.bw ?? 0, 0)
@@ -473,7 +493,7 @@ export default function Flagship() {
                   : "—"}
             </div>
             <div className="cap">
-              {loading
+              {showLoading
                 ? (cudaFam ? "measuring on the RTX 5060…" : `measuring on 24 ${xUnits === "ranks" ? "ranks" : "cores"}…`)
                 : cur
                   ? isCuda ? `occupancy at ${cur.x} threads/block`
@@ -485,7 +505,7 @@ export default function Flagship() {
             </div>
           </div>
           <div>
-            {loading ? (
+            {showLoading ? (
               <div className="metric"><span className="k">{cudaFam ? "Compiling & running CUDA sweep…" : "Compiling & running OpenMP sweep…"}</span><span className="v accent">live</span></div>
             ) : (
               result?.metrics.map((m, idx) => (

@@ -1,67 +1,133 @@
 # Visual HPC for Engineers (VHPCE)
 
-An interactive performance laboratory for learning High Performance Computing. Students
-edit code, run experiments, watch hardware behavior animate, and get explanations of
-*why* performance changes — built around the principle **performance intuition over
-syntax memorization**.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%E2%89%A520.9-339933?logo=node.js&logoColor=white)
+![pnpm](https://img.shields.io/badge/pnpm-11.5.1-F69220?logo=pnpm&logoColor=white)
 
-This repository currently holds the **planning set**. No application code has been
-written yet (by decision — see below). These documents are the contract we build against.
+An interactive performance laboratory for learning High Performance Computing. Students edit
+code, run experiments, watch hardware behavior animate, and get explanations of *why*
+performance changes — built around the principle **performance intuition over syntax
+memorization**. Covers **OpenMP, MPI, OpenACC, and CUDA**, with both a built-in physics-based
+**model** (works offline, in your browser) and **real measured runs** (your CPU/GPU, via Docker)
+behind the same UI.
 
 ---
 
-## Read these in order
+## What's inside
+
+A guided path from "what is parallelism" to "why doesn't *my* code scale" — nine pages, one
+shared data contract, and two interchangeable data sources (an in-browser physics **model**, and
+**measured** runs on real CPU/GPU cores):
+
+- **[Introduction](apps/web/src/components/Intro.tsx)** (`/intro`) — the front door: the one big
+  idea (model vs. measured), and a map of every page below with what it does and how long it takes.
+- **[Start Here](apps/web/src/components/FirstRun.tsx)** (`/start`) — three live runs on real
+  cores that tell the whole story in five minutes: parallel works, the naive version doesn't
+  scale (a synchronization bottleneck), and the one-line fix (reduction) does. Each step is a
+  **predict-before-you-run** — guess the speedup, then see the measured result.
+- **[Learn the Basics](apps/web/src/components/Learn.tsx)** (`/learn`) — six animated, offline
+  walkthroughs of core OpenMP/MPI concepts (fork-join, parallel-for, shared vs. private,
+  ranks/memory, send/recv, collectives), each linking onward to a runnable example or experiment.
+- **[Command Reference](apps/web/src/app/reference)** (`/reference`) — a searchable library of
+  ~190 OpenMP/MPI/OpenACC directives, each with a looping animation, a plain-English summary, a
+  C\|Fortran toggle, and a "▶ Run in the Playground" link. A **★ Essentials** filter narrows the
+  full library down to the must-knows for newcomers.
+- **[Heat Lab](apps/web/src/components/Lab.tsx)** (`/lab`) — an interactive 2-D heat-equation
+  solver with a domain-decomposition overlay (serial / OpenMP / MPI / GPU) that ties the picture
+  to real stencil code, plus a live convergence plot.
+- **[Flagship](apps/web/src/components/Flagship.tsx)** (`/`) — nine experiments (false sharing,
+  synchronization, bandwidth saturation, load imbalance, MPI halo exchange, GPU occupancy, GPU
+  coalescing, GPU divergence, GPU atomics), each with a **Model | Measured** toggle, a 2D\|3D
+  visualization, a scaling chart, and a deterministic what/why/how/expected diagnosis (+ optional
+  "Ask the AI" panel).
+- **[Compare](apps/web/src/components/Compare.tsx)** (`/compare`) — the same kernel through both
+  producers at once: the textbook model (dashed line) overlaid on the measured run on real
+  silicon (solid line), with scenario knobs to see exactly where the napkin math and the hardware
+  agree — and where, and why, they diverge.
+- **[Code Playground](apps/web/src/components/Playground.tsx)** (`/playground`) — write
+  arbitrary OpenMP C (or load one of 11 worked examples), predict its speedup, then compile and
+  run a thread-count sweep in a locked-down Docker sandbox. Results come with plain-language
+  diagnostics that route you to the Flagship experiment explaining the bottleneck, a thread-count
+  explorer, and optional cachegrind cache-miss profiling.
+- **[Play](apps/web/src/components/Play.tsx)** (`/play`) — the fun-first corner: race two kernel
+  variants head-to-head, predicting the winner before the real numbers come in (more games land
+  here over time).
+
+Everything above shares one data contract — `ProfileResult`/`ExperimentResult`
+(`@vhpce/profile-schema`) — so the **model** (runs entirely in your browser) and **measured**
+(runs in Docker, on your own CPU/GPU) producers are interchangeable: same charts, same metrics,
+same explanations.
+
+---
+
+## Get started
+
+| Tier | What you get | Requires |
+|---|---|---|
+| **0 — Quick Start** | The full UI in **Model** mode — every page, every experiment, fully interactive | Node ≥20.9 + pnpm. Any OS, any hardware. |
+| **1 — Measured (CPU)** | Real OpenMP/MPI runs on *your own* cores; the Playground actually compiles and executes your code | + Docker |
+| **2 — Measured (GPU)** | The CUDA experiments (occupancy, coalescing, divergence, atomics) run on *your own* NVIDIA GPU | + NVIDIA GPU + `nvidia-container-toolkit` |
+
+The fastest path (Tier 0 — Windows, macOS, or Linux, no Docker needed):
+
+```bash
+git clone https://github.com/nikosvil/VHPCE.git
+cd VHPCE
+corepack enable && pnpm install
+pnpm --filter web dev          # → http://localhost:3000  (Model mode, no Docker needed)
+```
+
+Open **http://localhost:3000/intro** for a guided tour of every page, or jump straight to
+**http://localhost:3000/start** for a 5-minute hands-on first run.
+
+**No local install at all?** Open this repo in **GitHub Codespaces** ("Code → Codespaces →
+Create codespace") — the [devcontainer](.devcontainer/devcontainer.json) installs everything
+automatically and forwards the right ports.
+
+**→ See [SETUP.md](SETUP.md)** for the full guide: a requirements matrix, per-OS Docker setup,
+GPU/CUDA setup, environment variables, a "verify your install" checklist, and troubleshooting.
+
+### For instructors
+
+A single shared gateway lets a whole class get **Measured** mode and a working **Playground**
+without installing Docker on student machines — see
+[SETUP.md § "For instructors: a shared classroom gateway"](SETUP.md#6-for-instructors-a-shared-classroom-gateway)
+for setup steps and a security note.
+
+---
+
+## Architecture & design docs
+
+For contributors, or anyone extending the platform:
 
 | # | Document | What it covers |
 |---|----------|----------------|
 | 1 | [docs/01-architecture.md](docs/01-architecture.md) | System architecture, tech stack + rationale, monorepo layout, the `ProfileResult` seam |
 | 2 | [docs/02-roadmap.md](docs/02-roadmap.md) | Phased plan P0→P5 with deliverables and definition-of-done |
-| 3 | [docs/03-flagship-mvp-spec.md](docs/03-flagship-mvp-spec.md) | The first demo: *"Why Parallel Code Gets Slower"* — full spec |
+| 3 | [docs/03-flagship-mvp-spec.md](docs/03-flagship-mvp-spec.md) | The flagship demo: *"Why Parallel Code Gets Slower"* — full spec |
 | 4 | [docs/04-performance-models.md](docs/04-performance-models.md) | The physics/math engine behind the simulations (the honest core) |
 | 5 | [docs/05-ai-explanation-layer.md](docs/05-ai-explanation-layer.md) | The "Both" explanation design: deterministic + optional LLM |
 | 6 | [docs/06-data-contracts.md](docs/06-data-contracts.md) | The `ProfileResult` schema in full — the seam everything depends on |
 
----
-
-## Key reality constraints (discovered, not assumed)
-
-These shaped every decision in the architecture. They are not negotiable facts about the
-current machine and the problem domain:
-
-1. **Real HPC execution runs *locally* via WSL2 + Docker — with one caveat.** This machine has
-   WSL2 (Ubuntu, **24 logical cores**), Docker Desktop, and an **RTX 5060 Laptop GPU** with
-   working CUDA passthrough (`nvidia-smi` sees it inside WSL). So real compilation, execution,
-   and **timing-based** profiling of C/C++/Fortran/OpenMP/MPI/CUDA happen on this laptop — no
-   cloud needed for development. **The caveat:** WSL2's virtualized kernel does *not* expose the
-   hardware PMU, so true hardware-counter tools (`perf` HW events, LIKWID, PAPI, VTune) do *not*
-   work locally. We still get real counters via *simulation* (Valgrind cachegrind/callgrind) and
-   real timing/scaling everywhere; true PMU counters are the bare-metal-Linux / cloud upgrade.
-2. **Node.js is not installed** on this machine (Python 3.14 and git are). The blueprint's
-   stack (Next.js/React/Three.js) needs Node. P0 is therefore designed to need *zero* build
-   tooling so we can ship something visual immediately; P1 installs the real toolchain.
-3. **"Visually exceptional" is a hard requirement, not a nice-to-have.** The blueprint says
-   the platform fails if it becomes static or boring. The flagship demo is the proof.
-
-**Local capability matrix (what's real on this laptop vs. what needs bare-metal/cloud):**
-
-| Capability | Local via WSL2/Docker | Notes |
-|-----------|:---------------------:|-------|
-| Compile + run C/C++/Fortran/OpenMP/MPI/CUDA | ✅ | toolchains install into Ubuntu; 24 cores for scaling sweeps |
-| Wall-clock timing → strong/weak scaling, speedup, efficiency | ✅ | backbone of the flagship and most lessons |
-| Cache-miss rates + instruction counts | ✅ *simulated* | Valgrind cachegrind/callgrind — no PMU needed |
-| MPI comm profiling (fractions, message sizes) | ✅ | mpiP / timing-based; multi-rank on one node |
-| GPU kernel timing + occupancy | ✅ | nvcc + Nsight Systems; RTX 5060 via CUDA passthrough |
-| Hardware PMU counters (cache-miss/IPC/bandwidth, *measured*) | ❌ locally | `perf` HW events / LIKWID / PAPI / VTune need the host PMU → bare-metal Linux or cloud |
-
-The architectural answer to #1 is the **simulate-now / measure-later seam** (see
-[docs/06-data-contracts.md](docs/06-data-contracts.md)): a single `ProfileResult` schema is
-consumed by all visualizers and the explanation engine. Early on it is produced by a
-physically-grounded **model** running in the browser; later the same schema is produced by
-**real profilers** in cloud containers. Nothing downstream changes when we swap producers.
+[`PROGRESS.md`](PROGRESS.md) has the operational summary: what's built, how to run it, the repo
+layout, and known gotchas.
 
 ---
 
-## Decisions log
+## Project history & decisions log
+
+<details>
+<summary>Expand for the full dated decisions log (2026-06-02 → present)</summary>
+
+VHPCE started as a planning-only repo (the architecture docs in `docs/01-06`, written before any
+application code existed) and was built out phase by phase (P0 → P4 + the Cloud Phase) on a
+single development machine — Windows 11 + WSL2 Ubuntu (24 logical cores), Docker Desktop, and an
+RTX 5060 Laptop GPU with working CUDA passthrough. That machine's WSL2 kernel doesn't expose the
+hardware PMU, so cache-miss/IPC counters in the Playground use **simulated** counters (Valgrind
+cachegrind) rather than `perf`/LIKWID/PAPI; every timing-based metric (speedup, efficiency,
+occupancy, bandwidth) is a real measurement. None of this affects how the app runs for *you* —
+see [SETUP.md](SETUP.md) — it's kept here as the historical record of why things are built the
+way they are.
 
 | Date | Decision | Rationale |
 |------|----------|-----------|
@@ -100,16 +166,15 @@ physically-grounded **model** running in the browser; later the same schema is p
 | 2026-06-04 | **Learning journey: connect Learn → Playground → Flagship** (beginner follow-on) | Added curated, one-click **worked examples** to the Playground (parallel sum, hello-threads, false sharing, STREAM triad) so beginners run real OpenMP without writing C; deep-linkable via `/playground?ex=<id>`. The `/learn` cards now link onward (OpenMP → a runnable example, MPI → `/?exp=mpiHalo`), and the Flagship opens a specific experiment by URL. All additive (a new `playground-examples.ts` + mount-time `?ex`/`?exp` URL reads + links); the two URL-sync effects are `eslint-disable`d for `set-state-in-effect` (SSR-safe, intentional). Verified in-browser (deep-links load the right example/tab, preset buttons swap source, no console errors); tsc + lint clean |
 | 2026-06-04 | **Beginner "Learn the Basics" section (`/learn`)** — a visual on-ramp for OpenMP & MPI, added per user request | Six offline Canvas2D concept animations (fork–join, parallel-for, shared vs private, MPI ranks/memory, send/recv, collectives) with annotated code, play/step controls, and a glossary. Purely **additive** (new route + `Learn.tsx`/`learn/scenes.ts` + nav link + CSS; no backend, no code executed) — does not touch the verified Flagship/Playground/gateway. Fills the gap below the pathology-focused Flagship: *how* parallelism works before *why* it gets slower. Verified in-browser (all 6 concepts, controls, no console errors); tsc + lint clean (new files add no lint debt) |
 | 2026-06-04 | **P4 (GPU/CUDA) built — "GPU Occupancy" experiment + a fourth execution model (the RTX 5060) through the seam** | A CUDA kernel swept across **threads/block (32→1024)** (`vhpce-cuda`, nvcc sm_120/PTX-JIT; `{kind:"cuda"}` gateway job → `docker run --gpus all`). The sixth flagship experiment contrasts **light vs heavy register pressure** (user choice): heavy (104 regs/thread measured) is register-limited (~33% occupancy, can't even launch large blocks); light (10 regs) reaches ~100%. Occupancy is **real** — the kernel queries the CUDA Occupancy API on the device (no Nsight). New x-domain (block size) gets its own `drawOccupancy` chart + a dedicated result builder (not `buildResult`); `SweepPoint`/`RunnerPoint` gained `occ`. Verified end-to-end (heavy/light via API + browser, occupancy chart, 2D/3D scenes, no console errors). GPU-in-container passthrough confirmed working |
+| 2026-06-10 | **Global student-lab rollout**: `LICENSE` (AGPL-3.0), rewritten `README.md`/new `SETUP.md`, `.devcontainer` (Codespaces), CI workflow, `apps/web/.env.example` | The platform is feature-complete (P0→P4 + Cloud); this phase makes it usable by **student labs anywhere** — clone-and-run on Tier 0 (Node+pnpm only, any OS), with optional Tier 1 (Docker, measured CPU) and Tier 2 (NVIDIA GPU, CUDA) clearly documented and gracefully optional. Also fixed a `Flagship`/`Explain.falseSharing` crash on `r.peak` being `undefined` for a freshly-switched experiment, and added the missing `apps/web` `typecheck` script (root `pnpm typecheck` was previously a silent no-op) |
 
-## Open questions (for the user, when we resume building)
+</details>
 
-- **Flagship data source:** pure *model* (zero-build HTML, instant, no install) or *model + real
-  local measurement* (install the WSL toolchain + a tiny local runner so the demo shows this
-  laptop's real 24-core scaling)? See [docs/02-roadmap.md](docs/02-roadmap.md) Phase 0.
-- **True PMU counters:** do you have/want a bare-metal Linux option (dual-boot or a real cluster)
-  for `perf`/LIKWID hardware counters, or is simulated (cachegrind) + timing enough for now?
-- Target browsers — is WebGPU acceptable, or must everything fall back to WebGL2? (affects viz engine)
-- Preferred LLM provider for the live panel — Claude (Anthropic), or provider-agnostic?
-- Node placement at P1 — install in WSL (nvm) for one Linux dev env, or Windows-native?
+---
 
-See [docs/02-roadmap.md](docs/02-roadmap.md) for what happens after this planning set is approved.
+## License
+
+[GNU AGPL-3.0](LICENSE) — you're free to use, study, modify, and share this project, including
+running a modified version as a network service, **provided you preserve copyright/attribution
+and make your source available to users under the same license.** See [LICENSE](LICENSE) for the
+full text.
