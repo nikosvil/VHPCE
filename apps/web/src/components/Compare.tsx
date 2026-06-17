@@ -161,9 +161,9 @@ export default function Compare() {
       )}
 
       <nav className="tabs">
-        {EXPERIMENTS.map((e, i) => (
+        {EXPERIMENTS.filter((e) => e.id in DEFAULT_PARAMS).map((e, i) => (
           <button key={e.id} className={"tab" + (e.id === exp ? " active" : "")} onClick={() => setExp(e.id as ExpId)}>
-            <span className="ix">0{i + 1}</span>{e.name}
+            <span className="ix">{String(i + 1).padStart(2, "0")}</span>{e.name}
           </button>
         ))}
       </nav>

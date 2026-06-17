@@ -171,6 +171,169 @@ export const Explain: Record<string, ExplainFn> = {
       exp: `Drop back toward one target and watch the time climb steeply as contention returns.`,
     };
   },
+
+  numaEffects(r) {
+    const c = r.current, numaAware = r.params.numaAware;
+    const NODE_SIZE = 12;
+    const remotePct = numaAware ? 0 : Math.max(0, (c.x - NODE_SIZE) / c.x) * 100;
+    if (numaAware)
+      return {
+        sev: "info",
+        what: `NUMA-aware: threads are pinned to their local socket — speedup reaches <b>${fmt(c.speedup, 1)}×</b> at ${c.x} threads (${fmt(c.efficiency * 100, 0)}% efficiency).`,
+        why: `Each thread accesses <b>local DRAM</b> through its socket's own memory controller. No inter-socket traffic, no remote-access latency penalty.`,
+        how: `Already optimal. Toggle off NUMA binding to watch efficiency collapse when threads cross the socket boundary.`,
+        exp: `This is the target curve — near-linear scaling regardless of thread count.`,
+      };
+    if (c.x <= NODE_SIZE)
+      return {
+        sev: "warn",
+        what: `With ${c.x} threads all on socket 0, speedup is <b>${fmt(c.speedup, 1)}×</b> (${fmt(c.efficiency * 100, 0)}% efficiency) — no NUMA penalty yet.`,
+        why: `All ${c.x} threads still live on the same socket as the data. Add more threads past ${NODE_SIZE} and the second socket's threads will access socket 0's memory over the slow inter-socket link.`,
+        how: `Push threads beyond ${NODE_SIZE} to see the NUMA cliff. The fix is <b>NUMA-aware binding</b> (toggle above).`,
+        exp: `When threads cross the socket boundary, efficiency drops sharply until cross-socket bandwidth is fully utilised.`,
+      };
+    return {
+      sev: "critical",
+      what: `<b>${fmt(remotePct, 0)}%</b> of threads access <b>remote socket memory</b> — speedup is only <b>${fmt(c.speedup, 1)}×</b> at ${c.x} threads instead of the expected ~${c.x}×.`,
+      why: `Threads 13–${c.x} were placed on socket 1 by the OS, but the memory (allocated on socket 0 via first-touch) is a <b>2.5× slower</b> remote DRAM hop away. Inter-socket QPI/Infinity Fabric traffic eats the scaling headroom.`,
+      how: `<b>Pin threads to their local socket</b>: <code>OMP_PROC_BIND=close</code>, <code>numactl --cpunodebind=0 --membind=0</code>, or allocate data after forking threads (first-touch on the right socket).`,
+      exp: `NUMA-aware binding eliminates the remote-access penalty — efficiency climbs back to the local curve.`,
+    };
+  },
+
+  cacheHierarchy(r) {
+    const c = r.current, level = r.params.level as string;
+    const levelNames: Record<string, string> = { L1: "L1 (32 KB, private per core)", L2: "L2 (512 KB, private per core)", L3: "L3 (24 MB, shared)", DRAM: "DRAM (40 GB/s, shared bus)" };
+    const friendly = levelNames[level] ?? level;
+    if (level === "L1" || level === "L2")
+      return {
+        sev: "info",
+        what: `${level} cache: data fits in each core's <b>private cache</b> — speedup reaches <b>${fmt(c.speedup, 1)}×</b> at ${c.x} threads (${fmt(c.efficiency * 100, 0)}% efficiency), near-linear.`,
+        why: `Each core has its own ${level} cache. Adding a thread adds another independent cache with its own local bandwidth — the total BW scales almost linearly with thread count.`,
+        how: `Already the best scenario. Switch to <b>L3</b> or <b>DRAM</b> to see shared bandwidth become the bottleneck.`,
+        exp: `This is what cache blocking / tiling achieves — keep the hot data in the per-core private cache and scaling stays efficient.`,
+      };
+    return {
+      sev: level === "DRAM" ? "critical" : "warn",
+      what: `${friendly}: speedup saturates at only <b>${fmt(c.speedup, 1)}×</b> at ${c.x} threads — <b>${fmt(c.efficiency * 100, 0)}% efficiency</b>, far below ideal.`,
+      why: `The working set lives in <b>${level}</b>, a ${level === "DRAM" ? "single shared DRAM bus" : "shared L3 ring"}. All threads compete for the same bandwidth; adding more cores doesn't help once that bus is full.`,
+      how: `<b>Cache block / tile</b> the computation so the hot data fits in L1 or L2 — each core then has private bandwidth and the scaling curve returns to near-ideal.`,
+      exp: `With L1 data, speedup climbs back toward linear — the same thread count, same bus, but each core now brings its own private bandwidth.`,
+    };
+  },
+
+  simdVec(r) {
+    const W = r.current.x, layout = r.params.layout as string;
+    const eff = r.current.efficiency;
+    if (layout === "SoA")
+      return {
+        sev: eff > 0.75 ? "info" : "warn",
+        what: `Structure-of-Arrays layout at ${W} SIMD lanes: <b>${fmt(W, 0)}× throughput</b> over scalar — all lanes fully utilised (${fmt(eff * 100, 0)}% lane efficiency).`,
+        why: `SoA stores each field contiguously, so a ${W}-wide SIMD load reads ${W} consecutive values of the same field — all lanes used, zero gather cost.`,
+        how: `Already the optimal layout. Switch to <b>AoS</b> to see lane efficiency collapse with wider vectors.`,
+        exp: `This is the target: throughput scales linearly with SIMD width when the data layout matches.`,
+      };
+    return {
+      sev: eff < 0.4 ? "critical" : "warn",
+      what: `Array-of-Structures layout at ${W} SIMD lanes: only <b>${fmt(Math.sqrt(W), 1)}× throughput</b> (${fmt(eff * 100, 0)}% lane efficiency) — scalar would give 1× at 100% efficiency.`,
+      why: `AoS interleaves fields: <code>{x,y,z,x,y,z,…}</code>. Loading the <code>x</code> values for ${W} elements requires a <b>gather</b> with stride equal to the struct size — lanes fetch from non-consecutive addresses and the gather overhead grows with width. At ${W} lanes, only ${fmt(eff * 100, 0)}% of the SIMD throughput is useful work.`,
+      how: `<b>Transpose to Structure-of-Arrays</b>: store all <code>x</code> values together, all <code>y</code> values together, etc. The ${W}-wide load becomes a single unit-stride fetch — no gather, all lanes busy.`,
+      exp: `With SoA, throughput rises from ${fmt(Math.sqrt(W), 1)}× to the full ${W}× — the vector unit pays for itself.`,
+    };
+  },
+
+  openmpTasks(r) {
+    const c = r.current, gran = r.params.granularity as string;
+    const ovhPct = gran === "coarse" ? (0.4 / c.time) * 100 : (0.005 * c.x * c.x / c.time) * 100;
+    if (gran === "coarse")
+      return {
+        sev: ovhPct < 5 ? "info" : "warn",
+        what: `Coarse tasks: speedup reaches <b>${fmt(c.speedup, 1)}×</b> at ${c.x} threads (${fmt(c.efficiency * 100, 0)}% efficiency) — task overhead only <b>${fmt(ovhPct, 1)}%</b> of runtime.`,
+        why: `Large tasks amortize the per-task creation and scheduling cost across a lot of useful work. The runtime overhead is negligible.`,
+        how: `Already balanced. Switch to <b>fine</b> granularity to watch task-queue contention overwhelm the computation.`,
+        exp: `This is the target: task size large enough that overhead is a rounding error.`,
+      };
+    return {
+      sev: "critical",
+      what: `Fine tasks at ${c.x} threads: speedup collapses to <b>${fmt(c.speedup, 1)}×</b> — <b>${fmt(ovhPct, 1)}% of runtime is overhead</b>, not useful work.`,
+      why: `Thousands of tiny tasks flood the runtime task queue. At ${c.x} threads, workers spend <b>${fmt(ovhPct, 1)}%</b> of their time creating tasks, stealing work, and synchronising the queue — the actual computation is a small fraction.`,
+      how: `<b>Merge tasks into coarser chunks</b>: increase the minimum task size so each task does enough work to pay for its overhead (a good rule of thumb: each task should take ≥ 1000× more time than the scheduler overhead, typically 1–10 µs).`,
+      exp: `Coarse tasks bring overhead to <1%, and the speedup tracks near-ideal scaling again.`,
+    };
+  },
+
+  cudaSharedMem(r) {
+    const S = r.current.x, padded = r.params.padding as boolean;
+    const eff = r.current.efficiency;
+    if (S === 1 || padded)
+      return {
+        sev: "info",
+        what: `${padded ? "Padded: all strides are" : "Stride 1:"} <b>conflict-free</b> — all 32 banks serve different warp lanes in a single cycle, ${fmt(r.bw ?? 0, 0)} GB/s achieved (${fmt(eff * 100, 0)}% efficiency).`,
+        why: `Shared memory is divided into 32 banks. When each of the warp's 32 lanes touches a <b>different bank</b>, the access is serviced in one hardware cycle — no serialisation.`,
+        how: `Already optimal. ${padded ? "" : "Increase the stride to see bank conflicts serialise the access."} For non-unit strides, the fix is adding <b>1 element of padding</b> per row (toggle "Padding").`,
+        exp: `Conflict-free accesses sustain peak shared memory bandwidth regardless of stride.`,
+      };
+    return {
+      sev: eff < 0.2 ? "critical" : "warn",
+      what: `<b>${S}-way bank conflict</b>: ${S} warp lanes map to the same bank, so the hardware serialises the access into <b>${S} passes</b> — only <b>${fmt(eff * 100, 0)}%</b> of peak bandwidth.`,
+      why: `Shared memory has 32 banks; with a stride of ${S} banks, every ${S}th lane lands on the same bank. The hardware can only serve one access per bank per cycle, so it queues the ${S} conflicting lanes — the warp effectively runs the access ${S} times in serial.`,
+      how: `<b>Add 1 element of padding per row</b> to shift each successive row's bank mapping, so stride-${S} access now hits ${S} different banks. Toggle "Padding" to see the fix.`,
+      exp: `With padding, even stride-${S} access is conflict-free — peak bandwidth restored.`,
+    };
+  },
+
+  mpiCollective(r) {
+    const c = r.current, collective = r.params.collective as string;
+    const commPct = r.idlePct ?? 0;
+    if (collective === "broadcast" || collective === "reduce")
+      return {
+        sev: c.efficiency > 0.6 ? "info" : "warn",
+        what: `${collective.charAt(0).toUpperCase() + collective.slice(1)} (tree algorithm): speedup <b>${fmt(c.speedup, 1)}×</b> at ${c.x} ranks (${fmt(c.efficiency * 100, 0)}% efficiency) — comm is only <b>${fmt(commPct, 0)}%</b> of runtime.`,
+        why: `A tree-based ${collective} takes <b>O(log₂ p)</b> steps, so the cost grows only 5× as you go from 2 to 32 ranks. The compute portion scales down linearly.`,
+        how: `This is the efficient pattern. Switch to <b>alltoall</b> to see O(p) communication cost destroy scaling.`,
+        exp: `For one-to-all or all-to-one patterns, always prefer broadcast/reduce over alltoall.`,
+      };
+    if (collective === "allreduce")
+      return {
+        sev: c.efficiency > 0.5 ? "info" : "warn",
+        what: `Allreduce (ring algorithm): speedup <b>${fmt(c.speedup, 1)}×</b> at ${c.x} ranks — moderate comm fraction of <b>${fmt(commPct, 0)}%</b>.`,
+        why: `A ring allreduce passes data around the ring in 2(p−1)/p steps, moving nearly the full message volume but amortising it — O(log p) effective cost with good bandwidth utilisation.`,
+        how: `Allreduce is usually the right collective for distributed gradient sums. Switch to <b>alltoall</b> to see what poor collective choice looks like.`,
+        exp: `Ring allreduce scales well; the bandwidth wall only appears at very high rank counts.`,
+      };
+    return {
+      sev: "critical",
+      what: `All-to-all communication: speedup <b>caps at ${fmt(r.peak?.speedup ?? c.speedup, 1)}×</b> and then degrades — at ${c.x} ranks comm overhead is <b>${fmt(commPct, 0)}%</b> of total time.`,
+      why: `MPI_Alltoall sends O(p) messages per rank — total traffic grows as <b>p²</b>. At ${c.x} ranks each rank sends to ${c.x - 1} others, and the collective cost grows linearly with rank count. This obliterates any compute speedup.`,
+      how: `Redesign the algorithm to use <b>allreduce</b> (O(log p)) or <b>reduce + broadcast</b> wherever a global all-to-all isn't strictly necessary.`,
+      exp: `Switching to allreduce drops comm fraction from ${fmt(commPct, 0)}% toward single digits — scaling resumes.`,
+    };
+  },
+
+  hybridMpi(r) {
+    const c = r.current, tpr = r.params.threadsPerRank as number;
+    const isPureMpi = tpr === 1;
+    const threads = Math.min(tpr, Math.floor(24 / Math.max(1, c.x)));
+    if (!isPureMpi && c.efficiency > 0.6)
+      return {
+        sev: "info",
+        what: `Hybrid ${c.x}×${threads}: speedup <b>${fmt(c.speedup, 1)}×</b> at ${c.x} ranks × ${threads} threads/rank (${fmt(c.efficiency * 100, 0)}% efficiency) — good balance between MPI overhead and OMP scalability.`,
+        why: `Fewer MPI ranks means less collective communication. Threads inside each rank share a NUMA-local L3 cache — no inter-socket traffic for the OpenMP work.`,
+        how: `Already a good decomposition. Try <b>12 threads/rank</b> (2 ranks × 12 threads, matching NUMA nodes) for even better locality.`,
+        exp: `This is the target region: rank count ≈ NUMA nodes, threads/rank ≈ cores/socket.`,
+      };
+    return {
+      sev: isPureMpi ? "warn" : "critical",
+      what: isPureMpi
+        ? `Pure MPI (1 thread/rank): speedup only <b>${fmt(c.speedup, 1)}×</b> at ${c.x} ranks (${fmt(c.efficiency * 100, 0)}% efficiency) — MPI overhead and NUMA noise limit scaling.`
+        : `${c.x} ranks × ${threads} threads: speedup <b>${fmt(c.speedup, 1)}×</b> (${fmt(c.efficiency * 100, 0)}%) — too many ranks for this node's memory topology.`,
+      why: isPureMpi
+        ? `With 1 thread/rank and ${c.x} ranks, multiple MPI processes share the same NUMA socket and compete for the same L3/memory bus. Communication overhead grows as O(log p) and inter-socket NUMA noise adds a hidden penalty.`
+        : `Too many MPI ranks → too much collective communication and ranks that share a NUMA socket (sub-rank affinity groups compete for shared L3).`,
+      how: `<b>Match the rank count to the number of NUMA nodes</b> (2 here), then fill each socket with OpenMP threads. Try <b>4 threads/rank</b> (6 ranks × 4 threads) or <b>12 threads/rank</b> (2 ranks × 12 threads).`,
+      exp: `Switching to hybrid (e.g. 6 ranks × 4 threads) reduces MPI overhead and keeps threads NUMA-local — efficiency climbs toward 80–90%.`,
+    };
+  },
 };
 
 export const ExplainMeasured: Record<string, ExplainFn> = {
@@ -334,4 +497,11 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       exp: `Collapse back toward one target and the measured time climbs steeply as contention returns.`,
     };
   },
+  numaEffects:     (r) => ({ ...Explain.numaEffects(r),     what: `<b>[Measured]</b> ` + Explain.numaEffects(r).what }),
+  cacheHierarchy:  (r) => ({ ...Explain.cacheHierarchy(r),  what: `<b>[Measured]</b> ` + Explain.cacheHierarchy(r).what }),
+  simdVec:         (r) => ({ ...Explain.simdVec(r),         what: `<b>[Measured]</b> ` + Explain.simdVec(r).what }),
+  openmpTasks:     (r) => ({ ...Explain.openmpTasks(r),     what: `<b>[Measured]</b> ` + Explain.openmpTasks(r).what }),
+  cudaSharedMem:   (r) => ({ ...Explain.cudaSharedMem(r),   what: `<b>[Measured]</b> ` + Explain.cudaSharedMem(r).what }),
+  mpiCollective:   (r) => ({ ...Explain.mpiCollective(r),   what: `<b>[Measured]</b> ` + Explain.mpiCollective(r).what }),
+  hybridMpi:       (r) => ({ ...Explain.hybridMpi(r),       what: `<b>[Measured]</b> ` + Explain.hybridMpi(r).what }),
 };

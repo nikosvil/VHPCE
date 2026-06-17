@@ -10,9 +10,17 @@ import CudaScene3D from "./scenes/CudaScene3D";
 import CoalesceScene3D from "./scenes/CoalesceScene3D";
 import DivergenceScene3D from "./scenes/DivergenceScene3D";
 import AtomicsScene3D from "./scenes/AtomicsScene3D";
+import NUMAScene3D from "./scenes/NUMAScene3D";
+import CacheHierarchyScene3D from "./scenes/CacheHierarchyScene3D";
+import SimdVecScene3D from "./scenes/SimdVecScene3D";
+import OpenmpTasksScene3D from "./scenes/OpenmpTasksScene3D";
+import CudaSharedMemScene3D from "./scenes/CudaSharedMemScene3D";
+import MpiCollectiveScene3D from "./scenes/MpiCollectiveScene3D";
+import HybridMpiScene3D from "./scenes/HybridMpiScene3D";
 import AskAI from "./AskAI";
 import {
   Models, Measured, runnerSpec, EXPERIMENTS, MAXP, TRIAD_AI,
+  SIMD_WIDTHS, BANK_STRIDES,
 } from "@vhpce/perf-models";
 import { Explain, ExplainMeasured } from "@vhpce/explain";
 import { drawScaling, drawRoofline, drawOccupancy, drawSweep, scenes } from "@vhpce/viz";
@@ -35,6 +43,13 @@ const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null 
   cudaCoalesce: CoalesceScene3D,
   cudaDivergence: DivergenceScene3D,
   cudaAtomics: AtomicsScene3D,
+  numaEffects: NUMAScene3D,
+  cacheHierarchy: CacheHierarchyScene3D,
+  simdVec: SimdVecScene3D,
+  openmpTasks: OpenmpTasksScene3D,
+  cudaSharedMem: CudaSharedMemScene3D,
+  mpiCollective: MpiCollectiveScene3D,
+  hybridMpi: HybridMpiScene3D,
 };
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, "");
@@ -64,7 +79,7 @@ function buildAiSummary(name: string, mode: string, r: ExperimentResult, e: Expl
   ].join("\n");
 }
 
-type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda" | "cudaCoalesce" | "cudaDivergence" | "cudaAtomics";
+type ExpId = "falseSharing" | "synchronization" | "bandwidth" | "imbalance" | "mpiHalo" | "cuda" | "cudaCoalesce" | "cudaDivergence" | "cudaAtomics" | "numaEffects" | "cacheHierarchy" | "simdVec" | "openmpTasks" | "cudaSharedMem" | "mpiCollective" | "hybridMpi";
 type Mode = "model" | "measured";
 
 // Union of every per-experiment params shape; each experiment only sets its own subset.
@@ -81,18 +96,40 @@ type ExpParams = {
   stride?: number;
   paths?: number;
   targets?: number;
+  // new experiments
+  numaAware?: boolean;
+  level?: string;
+  vectorWidth?: number;
+  layout?: string;
+  granularity?: string;
+  bankStride?: number;
+  padding?: boolean;
+  collective?: string;
+  threadsPerRank?: number;
 };
 
+// Experiments that have no Measured backend — Measured pill is disabled for these.
+const MODEL_ONLY = new Set<ExpId>([
+  "numaEffects", "cacheHierarchy", "simdVec", "openmpTasks", "cudaSharedMem", "mpiCollective", "hybridMpi",
+]);
+
 const DEFAULT_PARAMS: Record<ExpId, ExpParams> = {
-  falseSharing: { threads: 24, padded: false, intensity: 1 },
-  synchronization: { threads: 24, mode: "critical" },
-  bandwidth: { threads: 24, ai: 0.1 },
-  imbalance: { threads: 24, sched: "static" },
-  mpiHalo: { ranks: 24, mode: "strong" },
-  cuda: { blockSize: 256, variant: "heavy" },
-  cudaCoalesce: { stride: 8 },
+  falseSharing:   { threads: 24, padded: false, intensity: 1 },
+  synchronization:{ threads: 24, mode: "critical" },
+  bandwidth:      { threads: 24, ai: 0.1 },
+  imbalance:      { threads: 24, sched: "static" },
+  mpiHalo:        { ranks: 24, mode: "strong" },
+  cuda:           { blockSize: 256, variant: "heavy" },
+  cudaCoalesce:   { stride: 8 },
   cudaDivergence: { paths: 8 },
-  cudaAtomics: { targets: 1 },
+  cudaAtomics:    { targets: 1 },
+  numaEffects:    { threads: 24, numaAware: false },
+  cacheHierarchy: { threads: 24, level: "DRAM" },
+  simdVec:        { vectorWidth: 8, layout: "AoS" },
+  openmpTasks:    { threads: 8,  granularity: "fine" },
+  cudaSharedMem:  { bankStride: 4, padding: false },
+  mpiCollective:  { ranks: 8,   collective: "alltoall" },
+  hybridMpi:      { ranks: 4,   threadsPerRank: 4 },
 };
 
 const STRIDES = [1, 2, 4, 8, 16, 32];
@@ -132,10 +169,15 @@ export default function Flagship() {
   const isCoalesce = exp === "cudaCoalesce";
   const isDiverge = exp === "cudaDivergence";
   const isAtomics = exp === "cudaAtomics";
-  const cudaFam = isCuda || isCoalesce || isDiverge || isAtomics;
-  const xKey = exp === "mpiHalo" ? "ranks" : "threads";   // degree-of-parallelism param
-  const xLabel = exp === "mpiHalo" ? "Ranks" : "Threads";
+  const isSimd = exp === "simdVec";
+  const isCudaSharedMem = exp === "cudaSharedMem";
+  const cudaFam = isCuda || isCoalesce || isDiverge || isAtomics || isCudaSharedMem;
+  const sweepFam = isCoalesce || isDiverge || isAtomics || isSimd || isCudaSharedMem;
+  const ranksFam = exp === "mpiHalo" || exp === "mpiCollective" || exp === "hybridMpi";
+  const xKey = ranksFam ? "ranks" : "threads";
+  const xLabel = ranksFam ? "Ranks" : "Threads";
   const xUnits = result?.xUnits === "ranks" ? "ranks" : "threads";
+  const isModelOnly = MODEL_ONLY.has(exp);
 
   const setParam = useCallback(
     (patch: Partial<ExpParams>) => setParams((prev) => ({ ...prev, [exp]: { ...prev[exp], ...patch } })),
@@ -206,9 +248,10 @@ export default function Flagship() {
   // Redraw D3 charts when the result changes
   useEffect(() => {
     if (!result) return;
+    const SWEEP_IDS = new Set(["cudaCoalesce", "cudaDivergence", "cudaAtomics", "simdVec", "cudaSharedMem"]);
     if (scalingRef.current) {
       if (result.experimentId === "cuda") drawOccupancy(scalingRef.current, result);
-      else if (result.experimentId === "cudaCoalesce" || result.experimentId === "cudaDivergence" || result.experimentId === "cudaAtomics") drawSweep(scalingRef.current, result);
+      else if (SWEEP_IDS.has(result.experimentId)) drawSweep(scalingRef.current, result);
       else drawScaling(scalingRef.current, result);
     }
     if (result.experimentId === "bandwidth" && rooflineRef.current) drawRoofline(rooflineRef.current, result);
@@ -216,12 +259,13 @@ export default function Flagship() {
 
   // Redraw charts on window resize
   useEffect(() => {
+    const SWEEP_IDS = new Set(["cudaCoalesce", "cudaDivergence", "cudaAtomics", "simdVec", "cudaSharedMem"]);
     const onResize = () => {
       const r = resultRef.current;
       if (!r) return;
       if (scalingRef.current) {
         if (r.experimentId === "cuda") drawOccupancy(scalingRef.current, r);
-        else if (r.experimentId === "cudaCoalesce" || r.experimentId === "cudaDivergence" || r.experimentId === "cudaAtomics") drawSweep(scalingRef.current, r);
+        else if (SWEEP_IDS.has(r.experimentId)) drawSweep(scalingRef.current, r);
         else drawScaling(scalingRef.current, r);
       }
       if (r.experimentId === "bandwidth" && rooflineRef.current) drawRoofline(rooflineRef.current, r);
@@ -298,9 +342,9 @@ export default function Flagship() {
             <span className="dot" />Model
           </span>
           <span
-            className={"pill " + (runnerOk ? "click" : "disabled") + (mode === "measured" ? " sel" : "")}
-            title={runnerOk ? "live gateway · 24 cores" : "gateway offline — start it with  docker compose -f infra/docker/compose.yml up"}
-            onClick={() => { if (runnerOk) setMode("measured"); }}
+            className={"pill " + (runnerOk && !isModelOnly ? "click" : "disabled") + (mode === "measured" ? " sel" : "")}
+            title={isModelOnly ? "model-only experiment — no backend runner yet" : runnerOk ? "live gateway · 24 cores" : "gateway offline — start it with  docker compose -f infra/docker/compose.yml up"}
+            onClick={() => { if (runnerOk && !isModelOnly) setMode("measured"); }}
           >
             <span className="dot" />Measured · 24 cores
           </span>
@@ -316,8 +360,8 @@ export default function Flagship() {
 
       <nav className="tabs">
         {EXPERIMENTS.map((e, i) => (
-          <button key={e.id} className={"tab" + (e.id === exp ? " active" : "")} onClick={() => setExp(e.id as ExpId)}>
-            <span className="ix">0{i + 1}</span>{e.name}
+          <button key={e.id} className={"tab" + (e.id === exp ? " active" : "")} onClick={() => { setExp(e.id as ExpId); if (MODEL_ONLY.has(e.id as ExpId)) setMode("model"); }}>
+            <span className="ix">{String(i + 1).padStart(2, "0")}</span>{e.name}
           </button>
         ))}
       </nav>
@@ -325,7 +369,7 @@ export default function Flagship() {
       <div className="grid">
         <section className="card">
           <h2>Controls</h2>
-          {!cudaFam && (
+          {!cudaFam && !isSimd && (
             <div className="ctrl">
               <label>{xLabel}<b>{p[xKey]}</b></label>
               <input type="range" min={1} max={MAXP} step={1} value={p[xKey]}
@@ -463,6 +507,112 @@ export default function Flagship() {
               <div className="fixhint">The fix: <b>privatize</b> the updates — accumulate in per-block <code>__shared__</code> counters, then one global <Term k="atomic">atomic</Term> per block. Fewer threads per address = far less contention.</div>
             </div>
           )}
+
+          {exp === "numaEffects" && (
+            <div className="ctrl">
+              <label>NUMA binding
+                <span style={{ fontFamily: "var(--mono)", color: p.numaAware ? "var(--good)" : "var(--bad)" }}>{p.numaAware ? "ON" : "off"}</span>
+              </label>
+              <div className={"toggle" + (p.numaAware ? " on" : "")} onClick={() => setParam({ numaAware: !p.numaAware })}>
+                <div className="track"><div className="knob" /></div>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>pin threads to local NUMA socket</span>
+              </div>
+              <div className="fixhint">The fix: bind threads to their local socket (<code>OMP_PROC_BIND=close</code> or <code>numactl --cpunodebind</code>) so every access hits local DRAM — no cross-socket penalty.</div>
+            </div>
+          )}
+
+          {exp === "cacheHierarchy" && (
+            <div className="ctrl">
+              <label>Working set level</label>
+              <div className="seg fix">
+                {["L1", "L2", "L3", "DRAM"].map((lv) => (
+                  <button key={lv} className={p.level === lv ? "on" : ""} onClick={() => setParam({ level: lv })}>{lv}{lv === "L1" || lv === "L2" ? " ✓" : ""}</button>
+                ))}
+              </div>
+              <div className="fixhint">The fix: <b>cache block / tile</b> the computation so the hot data fits in L1 or L2 — each core then brings its own private bandwidth and scaling stays near-linear.</div>
+            </div>
+          )}
+
+          {exp === "simdVec" && (
+            <>
+              <div className="ctrl">
+                <label>Data layout</label>
+                <div className="seg fix">
+                  {[["SoA", "SoA ✓"], ["AoS", "AoS"]].map(([k, lab]) => (
+                    <button key={k} className={p.layout === k ? "on" : ""} onClick={() => setParam({ layout: k })}>{lab}</button>
+                  ))}
+                </div>
+                <div className="fixhint">The fix: <b>Structure-of-Arrays</b> stores each field contiguously — a vector load fills all lanes with no gather overhead.</div>
+              </div>
+              <div className="ctrl">
+                <label>SIMD width<b>{p.vectorWidth} lanes</b></label>
+                <div className="seg fix">
+                  {SIMD_WIDTHS.map((w) => (
+                    <button key={w} className={p.vectorWidth === w ? "on" : ""} onClick={() => setParam({ vectorWidth: w })}>{w === 1 ? "1 (scalar)" : w === 8 ? "8 (AVX)" : w === 16 ? "16 (AVX-512)" : String(w)}</button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {exp === "openmpTasks" && (
+            <div className="ctrl">
+              <label>Task granularity</label>
+              <div className="seg fix">
+                {[["coarse", "coarse ✓"], ["fine", "fine"]].map(([k, lab]) => (
+                  <button key={k} className={p.granularity === k ? "on" : ""} onClick={() => setParam({ granularity: k })}>{lab}</button>
+                ))}
+              </div>
+              <div className="fixhint">The fix: <b>merge tasks into coarser chunks</b> so each task does enough work to amortize the runtime scheduling overhead (target ≥ 1 µs per task).</div>
+            </div>
+          )}
+
+          {exp === "cudaSharedMem" && (
+            <>
+              <div className="ctrl">
+                <label>Bank stride<b>{p.bankStride === 1 ? "1 (conflict-free)" : p.bankStride + "-way conflict"}</b></label>
+                <div className="seg fix">
+                  {BANK_STRIDES.map((s) => (
+                    <button key={s} className={p.bankStride === s ? "on" : ""} onClick={() => setParam({ bankStride: s })}>{s === 1 ? "1 ✓" : s}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="ctrl">
+                <label>Row padding
+                  <span style={{ fontFamily: "var(--mono)", color: p.padding ? "var(--good)" : "var(--bad)" }}>{p.padding ? "FIXED" : "off"}</span>
+                </label>
+                <div className={"toggle" + (p.padding ? " on" : "")} onClick={() => setParam({ padding: !p.padding })}>
+                  <div className="track"><div className="knob" /></div>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>+1 element per row → shifts bank mapping</span>
+                </div>
+                <div className="fixhint">The fix: add <b>1 element of padding</b> per shared-memory row to rotate the bank mapping so stride-N access hits N different banks — conflict-free.</div>
+              </div>
+            </>
+          )}
+
+          {exp === "mpiCollective" && (
+            <div className="ctrl">
+              <label>Collective operation</label>
+              <div className="seg fix">
+                {[["broadcast", "bcast ✓"], ["reduce", "reduce ✓"], ["allreduce", "allreduce"], ["alltoall", "alltoall"]].map(([k, lab]) => (
+                  <button key={k} className={p.collective === k ? "on" : ""} onClick={() => setParam({ collective: k })}>{lab}</button>
+                ))}
+              </div>
+              <div className="fixhint">The fix: prefer <b>broadcast / reduce</b> (O(log p)) over alltoall (O(p)). If a global sum is needed, use <b>allreduce</b> — ring algorithm keeps cost logarithmic.</div>
+            </div>
+          )}
+
+          {exp === "hybridMpi" && (
+            <div className="ctrl">
+              <label>Threads / rank<b>{p.threadsPerRank}</b></label>
+              <div className="seg fix">
+                {[1, 2, 4, 6, 12].map((t) => (
+                  <button key={t} className={p.threadsPerRank === t ? "on" : ""} onClick={() => setParam({ threadsPerRank: t })}>{t === 1 ? "1 (pure MPI)" : t === 12 ? "12 (1 rank/socket)" : String(t)}</button>
+                ))}
+              </div>
+              <div className="fixhint">The fix: <b>match the rank count to the number of NUMA nodes</b> (2 here), fill each socket with OpenMP threads. Reduces MPI collective cost and keeps memory accesses NUMA-local.</div>
+            </div>
+          )}
         </section>
 
         <section className="card vizwrap">
@@ -485,28 +635,32 @@ export default function Flagship() {
             <div className="big" style={{ color: heroColor }}>
               {showLoading ? "•••"
                 : cur
-                  ? isCuda ? fmt((result?.occupancy ?? cur.efficiency) * 100, 0) + "%"
-                  : isCoalesce ? fmt(result?.bw ?? 0, 0)
-                  : isDiverge ? fmt(result?.factor ?? 1 / (cur.efficiency || 1), 1) + "×"
-                  : isAtomics ? fmt(result?.factor ?? 1 / (cur.efficiency || 1), 1) + "×"
+                  ? isCuda        ? fmt((result?.occupancy ?? cur.efficiency) * 100, 0) + "%"
+                  : isCoalesce    ? fmt(result?.bw ?? 0, 0)
+                  : isDiverge     ? fmt(result?.factor ?? 1 / (cur.efficiency || 1), 1) + "×"
+                  : isAtomics     ? fmt(result?.factor ?? 1 / (cur.efficiency || 1), 1) + "×"
+                  : isCudaSharedMem ? fmt(result?.bw ?? 0, 0)
+                  : isSimd        ? fmt(cur.speedup, 1) + "×"
                   : fmt(cur.speedup, 1) + "×"
                   : "—"}
             </div>
             <div className="cap">
               {showLoading
-                ? (cudaFam ? "measuring on the RTX 5060…" : `measuring on 24 ${xUnits === "ranks" ? "ranks" : "cores"}…`)
+                ? (cudaFam ? "measuring on the RTX 5060…" : ranksFam ? `measuring on 24 ${xUnits}…` : `measuring on 24 cores…`)
                 : cur
-                  ? isCuda ? `occupancy at ${cur.x} threads/block`
-                    : isCoalesce ? `GB/s · stride ${cur.x} · ${fmt(cur.efficiency * 100, 0)}% of coalesced peak`
-                    : isDiverge ? `slower than uniform · ${cur.x} path${cur.x > 1 ? "s" : ""} · ${fmt(cur.efficiency * 100, 0)}% lanes active`
-                    : isAtomics ? `slower than spread · ${cur.x} target${cur.x > 1 ? "s" : ""} · ${fmt(cur.efficiency * 100, 0)}% throughput`
+                  ? isCuda        ? `occupancy at ${cur.x} threads/block`
+                    : isCoalesce  ? `GB/s · stride ${cur.x} · ${fmt(cur.efficiency * 100, 0)}% of coalesced peak`
+                    : isDiverge   ? `slower than uniform · ${cur.x} path${cur.x > 1 ? "s" : ""} · ${fmt(cur.efficiency * 100, 0)}% lanes active`
+                    : isAtomics   ? `slower than spread · ${cur.x} target${cur.x > 1 ? "s" : ""} · ${fmt(cur.efficiency * 100, 0)}% throughput`
+                    : isCudaSharedMem ? `GB/s · stride ${cur.x} · ${fmt(cur.efficiency * 100, 0)}% of peak shared BW`
+                    : isSimd      ? `throughput at ${cur.x} SIMD lanes (${fmt(cur.efficiency * 100, 0)}% lane utilization)`
                     : `speedup on ${cur.x} of 24 ${xUnits === "ranks" ? "ranks" : "cores"}`
-                  : (isCuda ? "occupancy" : isCoalesce ? "GB/s" : isDiverge ? "warp slowdown" : isAtomics ? "atomic slowdown" : "speedup")}
+                  : (isCuda ? "occupancy" : isCoalesce ? "GB/s" : isDiverge ? "warp slowdown" : isAtomics ? "atomic slowdown" : isCudaSharedMem ? "GB/s" : "speedup")}
             </div>
           </div>
           <div>
             {showLoading ? (
-              <div className="metric"><span className="k">{cudaFam ? "Compiling & running CUDA sweep…" : "Compiling & running OpenMP sweep…"}</span><span className="v accent">live</span></div>
+              <div className="metric"><span className="k">{cudaFam ? "Compiling & running CUDA sweep…" : ranksFam ? "Compiling & running MPI sweep…" : "Compiling & running OpenMP sweep…"}</span><span className="v accent">live</span></div>
             ) : (
               result?.metrics.map((m, idx) => (
                 <div className="metric" key={idx}>
@@ -521,7 +675,7 @@ export default function Flagship() {
 
       <div className="lower">
         <section className="card">
-          <h2>{isCuda ? "Occupancy · 32 → 1024 threads/block" : isCoalesce ? "Bandwidth efficiency · stride 1 → 32" : isDiverge ? "Throughput vs uniform · 1 → 32 paths" : isAtomics ? "Atomic throughput · 1 → 4096 targets" : `Scaling · 1 → ${MAXP} ${xUnits}`}</h2>
+          <h2>{isCuda ? "Occupancy · 32 → 1024 threads/block" : isCoalesce ? "Bandwidth efficiency · stride 1 → 32" : isDiverge ? "Throughput vs uniform · 1 → 32 paths" : isAtomics ? "Atomic throughput · 1 → 4096 targets" : isSimd ? "Throughput vs SIMD width" : isCudaSharedMem ? "Shared memory BW vs bank stride" : `Scaling · 1 → ${MAXP} ${xUnits}`}</h2>
           <div className={"charts" + (exp === "bandwidth" ? " two" : "")}>
             <div className="chart">
               <svg ref={scalingRef} />
@@ -541,6 +695,16 @@ export default function Flagship() {
                   <>
                     <span><i style={{ borderColor: "var(--accent)" }} />throughput vs spread</span>
                     <span><i style={{ borderColor: "var(--accent2)" }} />target points</span>
+                  </>
+                ) : isSimd ? (
+                  <>
+                    <span><i style={{ borderColor: "var(--accent)" }} />throughput gain vs scalar</span>
+                    <span><i style={{ borderColor: "var(--accent2)" }} />SIMD width points</span>
+                  </>
+                ) : isCudaSharedMem ? (
+                  <>
+                    <span><i style={{ borderColor: "var(--accent)" }} />BW efficiency vs conflict-free</span>
+                    <span><i style={{ borderColor: "var(--accent2)" }} />stride points</span>
                   </>
                 ) : isDiverge ? (
                   <>

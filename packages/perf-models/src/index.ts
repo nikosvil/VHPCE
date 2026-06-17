@@ -68,19 +68,29 @@ export const SCHED: Record<string, { label: string }> = {
 };
 
 export const EXPERIMENTS = [
-  { id: "falseSharing", name: "False Sharing", scene: "cache lines · coherence ping-pong" },
-  { id: "synchronization", name: "Synchronization", scene: "thread timeline · lock serialization" },
-  { id: "bandwidth", name: "Bandwidth Saturation", scene: "memory bus · roofline" },
-  { id: "imbalance", name: "Load Imbalance", scene: "thread timeline · idle tails" },
-  { id: "mpiHalo", name: "MPI Halo Exchange", scene: "ranks · halo exchange · comm wall" },
-  { id: "cuda", name: "GPU Occupancy", scene: "warps · SMs · register pressure" },
-  { id: "cudaCoalesce", name: "GPU Coalescing", scene: "warp · memory transactions" },
-  { id: "cudaDivergence", name: "GPU Divergence", scene: "warp · serialized branch paths" },
-  { id: "cudaAtomics", name: "GPU Atomics", scene: "warps · atomic contention" },
+  { id: "falseSharing",    name: "False Sharing",        scene: "cache lines · coherence ping-pong" },
+  { id: "synchronization", name: "Synchronization",      scene: "thread timeline · lock serialization" },
+  { id: "bandwidth",       name: "Bandwidth Saturation", scene: "memory bus · roofline" },
+  { id: "imbalance",       name: "Load Imbalance",       scene: "thread timeline · idle tails" },
+  { id: "mpiHalo",         name: "MPI Halo Exchange",    scene: "ranks · halo exchange · comm wall" },
+  { id: "cuda",            name: "GPU Occupancy",         scene: "warps · SMs · register pressure" },
+  { id: "cudaCoalesce",    name: "GPU Coalescing",        scene: "warp · memory transactions" },
+  { id: "cudaDivergence",  name: "GPU Divergence",        scene: "warp · serialized branch paths" },
+  { id: "cudaAtomics",     name: "GPU Atomics",           scene: "warps · atomic contention" },
+  // — new experiments —
+  { id: "numaEffects",     name: "NUMA Effects",          scene: "sockets · memory locality · first-touch" },
+  { id: "cacheHierarchy",  name: "Cache Hierarchy",       scene: "L1 · L2 · L3 · DRAM bandwidth cliffs" },
+  { id: "simdVec",         name: "SIMD Vectorization",    scene: "SIMD lanes · AoS vs SoA · AVX" },
+  { id: "openmpTasks",     name: "OpenMP Tasks",          scene: "task graph · irregular parallelism" },
+  { id: "cudaSharedMem",   name: "GPU Shared Memory",     scene: "bank conflicts · 32 banks · padding" },
+  { id: "mpiCollective",   name: "MPI Collectives",       scene: "broadcast · allreduce · alltoall" },
+  { id: "hybridMpi",       name: "Hybrid MPI+OMP",        scene: "ranks × threads · NUMA sweet spot" },
 ];
 
 export const GPU_SWEEP = [1, 2, 4, 8, 16, 32];
 export const ATOM_SWEEP = [1, 4, 16, 64, 256, 1024, 4096];
+export const SIMD_WIDTHS = [1, 2, 4, 8, 16];
+export const BANK_STRIDES = [1, 2, 4, 8, 16, 32];
 
 // MPI halo model: compute that scales with ranks + a communication term that grows ~log(ranks).
 export const HALO = { T1: 1000, Tc0: 8, Tc1: 18 };
@@ -297,6 +307,193 @@ export const Models: Record<string, (p: any) => ExperimentResult> = {
         { k: "Best", v: "spread wide", tone: "accent" },
       ],
     } as ExperimentResult;
+  },
+
+  // ── 10. NUMA Effects ──────────────────────────────────────────────────────
+  numaEffects(params) {
+    const { numaAware } = params;
+    const T1 = 1000, NODE_SIZE = 12, REMOTE_PENALTY = 2.5;
+    const timeOf = (p: number) => {
+      if (numaAware) return T1 / p + 0.3;
+      const remoteFrac = Math.max(0, (p - NODE_SIZE) / p);
+      return (T1 / p) * (1 + remoteFrac * (REMOTE_PENALTY - 1));
+    };
+    return buildResult("numaEffects", params, timeOf, (cur) => {
+      const remoteFrac = numaAware ? 0 : Math.max(0, (cur.x - NODE_SIZE) / cur.x);
+      const remotePct = remoteFrac * 100;
+      const effBW = REF.BW_peak * (1 - remoteFrac) + (REF.BW_peak / REMOTE_PENALTY) * remoteFrac;
+      return {
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: numaAware ? "good" : cur.x > NODE_SIZE ? "bad" : "warn" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Remote accesses", v: fmt(remotePct, 0) + "%", tone: remotePct < 5 ? "good" : remotePct < 30 ? "warn" : "bad" },
+          { k: "Effective BW", v: fmt(effBW, 1) + " GB/s", tone: effBW > 35 ? "good" : effBW > 25 ? "warn" : "bad" },
+        ],
+      };
+    });
+  },
+
+  // ── 11. Cache Hierarchy ───────────────────────────────────────────────────
+  cacheHierarchy(params) {
+    const level = (params.level as string) || "DRAM";
+    const T1 = 1000;
+    // p_half encodes how quickly bandwidth saturates. Private caches (L1/L2) scale near-linearly
+    // (large p_half), shared caches (L3/DRAM) saturate quickly (small p_half).
+    const P_HALF: Record<string, number> = { L1: 999, L2: 40, L3: 10, DRAM: REF.p_half };
+    const ph = P_HALF[level] ?? REF.p_half;
+    const bwScale = (p: number) => p / (p + ph);
+    const timeOf = (p: number) => T1 / (bwScale(p) / bwScale(1));
+    return buildResult("cacheHierarchy", params, timeOf, (cur) => {
+      const scaleFrac = (bwScale(cur.x) / bwScale(1)) / cur.x;
+      return {
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: level === "L1" || level === "L2" ? "good" : level === "L3" ? "warn" : "bad" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Memory level", v: level, tone: level === "L1" ? "good" : level === "L2" ? "good" : level === "L3" ? "warn" : "bad" },
+          { k: "BW scaling", v: fmt(scaleFrac * 100, 0) + "% of ideal", tone: scaleFrac > 0.7 ? "good" : scaleFrac > 0.4 ? "warn" : "bad" },
+        ],
+      };
+    });
+  },
+
+  // ── 12. SIMD / Vectorization (sweep style) ────────────────────────────────
+  simdVec(params) {
+    const { layout } = params;
+    // SoA: throughput = W (full lane utilization).  AoS: gather cost → throughput = √W.
+    const tp = (W: number) => (layout === "SoA" ? W : Math.sqrt(W));
+    const tpBest = tp(SIMD_WIDTHS[SIMD_WIDTHS.length - 1]);
+    const sweep: SweepPoint[] = SIMD_WIDTHS.map((W) => {
+      const t = tp(W), eff = t / W, rel = t / tpBest;
+      return { x: W, time: 1 / rel, speedup: rel, efficiency: eff };
+    });
+    const W = (params.vectorWidth as number) || 8;
+    const cur = sweep.find((s) => s.x === W) ?? sweep[sweep.length - 1];
+    const wLabel = (w: number) =>
+      w === 1 ? " (scalar)" : w === 4 ? " (SSE/128-bit)" : w === 8 ? " (AVX-256)" : w === 16 ? " (AVX-512)" : "×";
+    return {
+      experimentId: "simdVec", source: "model", referenceMachine: REF.id, params,
+      sweep, current: cur, xLabel: "SIMD width — parallel lanes per instruction",
+      metrics: [
+        { k: "SIMD width", v: W + wLabel(W), tone: W >= 8 ? "good" : W >= 4 ? "warn" : "bad" },
+        { k: "Lane utilization", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.75 ? "good" : cur.efficiency > 0.5 ? "warn" : "bad" },
+        { k: "Layout", v: String(layout), tone: layout === "SoA" ? "good" : "bad" },
+        { k: "Throughput gain", v: fmt(tp(W), 1) + "× vs scalar", tone: tp(W) > 4 ? "good" : tp(W) > 2 ? "warn" : "bad" },
+        { k: "Best", v: "SoA + AVX-512 (16×)", tone: "accent" },
+      ],
+    } as ExperimentResult;
+  },
+
+  // ── 13. OpenMP Tasks ──────────────────────────────────────────────────────
+  openmpTasks(params) {
+    const { granularity } = params;
+    const T1 = 1000;
+    // coarse: fixed overhead per few large tasks.  fine: task-queue contention ∝ p².
+    const timeOf = (p: number) =>
+      granularity === "coarse" ? T1 / p + 0.4 : T1 / p + 0.005 * p * p;
+    return buildResult("openmpTasks", params, timeOf, (cur) => {
+      const ovh = granularity === "coarse" ? 0.4 : 0.005 * cur.x * cur.x;
+      const ovhPct = (ovh / cur.time) * 100;
+      return {
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: granularity === "coarse" ? "good" : cur.x > 8 ? "bad" : "warn" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Task overhead", v: fmt(ovhPct, 1) + "%", tone: ovhPct < 5 ? "good" : ovhPct < 25 ? "warn" : "bad" },
+          { k: "Granularity", v: String(granularity), tone: granularity === "coarse" ? "good" : "bad" },
+        ],
+      };
+    });
+  },
+
+  // ── 14. GPU Shared Memory Bank Conflicts (sweep style) ────────────────────
+  cudaSharedMem(params) {
+    const { padding } = params;
+    const PEAK_BW = 2600; // notional shared-memory peak BW (GB/s on modern GPU)
+    const sweep: SweepPoint[] = BANK_STRIDES.map((S) => {
+      const eff = padding ? 1 : 1 / S;
+      return { x: S, time: S, speedup: eff, efficiency: eff };
+    });
+    const S = (params.bankStride as number) || 1;
+    const cur = sweep.find((s) => s.x === S) ?? sweep[0];
+    const eff = padding ? 1 : 1 / S;
+    const bw = PEAK_BW * eff;
+    return {
+      experimentId: "cudaSharedMem", source: "model", referenceMachine: REF.id, params,
+      sweep, current: cur, xLabel: "shared memory access stride in banks (1 = conflict-free)",
+      bw, util: eff,
+      metrics: [
+        { k: "Bank stride", v: S + (S === 1 || padding ? " (conflict-free)" : "-way conflict"), tone: S === 1 || padding ? "good" : S <= 4 ? "warn" : "bad" },
+        { k: "Serialized passes", v: padding ? "1" : String(S), tone: S === 1 || padding ? "good" : S <= 4 ? "warn" : "bad" },
+        { k: "SM shared BW", v: fmt(bw, 0) + " GB/s", tone: eff > 0.6 ? "good" : eff > 0.3 ? "warn" : "bad" },
+        { k: "BW efficiency", v: fmt(eff * 100, 0) + "%", tone: eff > 0.6 ? "good" : eff > 0.3 ? "warn" : "bad" },
+        { k: "Padding", v: padding ? "ACTIVE — conflict-free" : "off", tone: padding ? "good" : "bad" },
+      ],
+    } as ExperimentResult;
+  },
+
+  // ── 15. MPI Collectives ───────────────────────────────────────────────────
+  mpiCollective(params) {
+    const { collective } = params;
+    const T1 = 1000, tMsg = 1.5; // ms per collective step (shared-memory node)
+    const commCost = (p: number): number => {
+      if (p <= 1) return 0;
+      switch (collective) {
+        case "broadcast":
+        case "reduce":    return tMsg * Math.ceil(Math.log2(p));
+        case "allreduce": return tMsg * 2 * ((p - 1) / p) * Math.log2(p);
+        case "alltoall":  return tMsg * (p - 1);
+        default:          return 0;
+      }
+    };
+    const timeOf = (p: number) => T1 / p + commCost(p);
+    return buildResult("mpiCollective", params, timeOf, (cur, sw) => {
+      const cc = commCost(cur.x), commPct = (cc / cur.time) * 100;
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      return {
+        peak,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: collective === "broadcast" || collective === "reduce" ? "good" : collective === "allreduce" ? "warn" : "bad" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Collective", v: String(collective), tone: collective === "alltoall" ? "bad" : "good" },
+          { k: "Comm fraction", v: fmt(commPct, 0) + "%", tone: commPct < 15 ? "good" : commPct < 40 ? "warn" : "bad" },
+          { k: "Complexity", v: collective === "alltoall" ? "O(p)" : "O(log p)", tone: collective === "alltoall" ? "bad" : "good" },
+        ],
+      };
+    }, "model", { xUnits: "ranks" });
+  },
+
+  // ── 16. Hybrid MPI + OpenMP ───────────────────────────────────────────────
+  hybridMpi(params) {
+    const tpr = (params.threadsPerRank as number) || 1;
+    const T1 = 1000, TOTAL = 24, NUMA_NODES = 2;
+    const totalCores = (ranks: number) => Math.min(TOTAL, ranks * tpr);
+    const timeOf = (ranks: number) => {
+      const tc = totalCores(ranks);
+      if (tc <= 0) return T1;
+      const compute = T1 / tc;
+      const mpiOvh = ranks > 1 ? 2.5 * Math.log2(ranks) : 0;
+      // Pure MPI (tpr=1) with many ranks → some ranks share a socket, causing NUMA noise.
+      const numaP = tpr === 1 && ranks > NUMA_NODES
+        ? 0.03 * Math.min(ranks - NUMA_NODES, NUMA_NODES) * compute : 0;
+      return compute + mpiOvh + numaP;
+    };
+    return buildResult("hybridMpi", params, timeOf, (cur) => {
+      const tc = totalCores(cur.x);
+      const threads = Math.min(tpr, Math.floor(TOTAL / Math.max(1, cur.x)));
+      return {
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: cur.efficiency > 0.65 ? "good" : "warn" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Total cores active", v: String(tc), tone: tc === TOTAL ? "good" : "warn" },
+          { k: "Threads / rank", v: String(threads), tone: threads >= 4 ? "good" : "warn" },
+          { k: "Core utilization", v: fmt((tc / TOTAL) * 100, 0) + "%", tone: tc >= TOTAL ? "good" : "warn" },
+        ],
+      };
+    }, "model", { xUnits: "ranks" });
   },
 };
 
