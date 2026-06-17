@@ -13,6 +13,7 @@ __pycache__/
 node_modules/
 .next/
 dist/
+.turbo/
 
 # os / editor
 .DS_Store

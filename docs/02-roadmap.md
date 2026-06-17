@@ -119,16 +119,13 @@ divergence, coalescing, shared memory, register pressure); PCIe transfer view.
 **DoD:** a CUDA kernel run on the RTX 5060 reports occupancy with an explanation of the limiter
 (e.g., register pressure) and a suggested fix.
 
-**Status (2026-06-04) — landed.** A sixth flagship experiment, **GPU Occupancy**: a CUDA kernel swept
-across **threads/block (32→1024)** on the **RTX 5060** (sm_120) through the gateway's `{kind:"cuda"}`
-job → `docker run --gpus all vhpce-cuda` (nvcc, sm_120 native with a `compute_90` PTX-JIT fallback).
-The teaching contrast is **register pressure**: the heavy kernel (104 registers/thread, measured) is
-**register-limited** (~33% occupancy; large blocks can't even launch — "too many resources"), while
-the light kernel (10 regs) reaches ~100%. The DoD is met — it reports achieved occupancy, names the
-**limiter** (registers), and suggests the fix (cut registers / `__launch_bounds__` / pick the
-occupancy-optimal block). **Occupancy is measured for real** via the CUDA Occupancy API on the device
-(Nsight Compute on WSL2 remains future work); the GPU-specific x-domain gets a dedicated
-`drawOccupancy` chart. Coalescing / divergence / shared-memory and the PCIe view remain future work.
+**Status (2026-06-04, updated 2026-06-17) — fully landed.** Four GPU experiments:
+- **GPU Occupancy** — threads/block sweep; register pressure (heavy/light toggle); CUDA Occupancy API; `drawOccupancy` chart.
+- **GPU Coalescing** — stride sweep (1→32); non-contiguous warp access cost; model uses transaction-count formula.
+- **GPU Divergence** — branch-path sweep (1→16); warp serialization cost; model uses serialized-fraction formula.
+- **GPU Atomics** — concurrent-target sweep (1→24); shared-memory atomic contention; model uses queuing formula.
+
+All four go through `{kind:"cuda"}` → `docker run --gpus all vhpce-cuda` (nvcc, sm_120 / PTX-JIT fallback). Occupancy is real (CUDA Occupancy API). Nsight Compute counters on WSL2 remain future work. The PCIe transfer view from the original deliverables remains future work.
 
 ## Phase 5 — Domains, gamification, classrooms, cloud scale
 
@@ -139,6 +136,13 @@ the Slurm bridge for real clusters. These bare-metal/cloud nodes also unlock **t
 (`perf`/LIKWID/PAPI), upgrading measured `ProfileResult`s beyond what WSL2 can provide locally.
 **DoD:** an instructor runs a class through a "speed up this code" challenge backed by real
 cluster execution.
+
+**Status (2026-06-17) — gamification layer partially landed.** The `/play` hub, head-to-head
+kernel race, predict-before-you-run mechanic (across Start / Playground / Flagship), and a
+badge + streak system for correct predictions are built and merged. A guess-the-bottleneck quiz
+and an Amdahl & Gustafson interactive sandbox are in the next PR (`feat/badges-pr30`).
+Engineering domain modules (FEM/FDTD/CFD), classrooms/LMS, K8s autoscaling, and PMU counters
+remain future work.
 
 ---
 

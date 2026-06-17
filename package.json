@@ -8,7 +8,12 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "gateway:build:cpu": "docker compose -f infra/docker/compose.yml --profile build build bench runner mpi",
+    "gateway:build:gpu": "docker compose -f infra/docker/compose.yml --profile build build cuda",
+    "gateway:up": "docker compose -f infra/docker/compose.yml up -d",
+    "gateway:down": "docker compose -f infra/docker/compose.yml down",
+    "gateway:logs": "docker compose -f infra/docker/compose.yml logs -f"
   },
   "devDependencies": {
     "turbo": "^2.5.0",
