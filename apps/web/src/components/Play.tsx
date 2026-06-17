@@ -4,11 +4,15 @@ import { useEffect, useState } from "react";
 import { health } from "../lib/runner";
 import Race from "./play/Race";
 import Badges from "./play/Badges";
+import Quiz from "./play/Quiz";
+import Sandbox from "./play/Sandbox";
 
 // The "Play" hub — the fun-first corner. Tabs are added here as each game lands.
 const TABS = [
-  { id: "race",   label: "⚡ Race" },
-  { id: "badges", label: "🏅 Badges" },
+  { id: "race",    label: "⚡ Race" },
+  { id: "quiz",    label: "🧩 Quiz" },
+  { id: "sandbox", label: "🔬 Sandbox" },
+  { id: "badges",  label: "🏅 Badges" },
 ];
 
 export default function Play() {
@@ -40,8 +44,10 @@ export default function Play() {
         ))}
       </nav>
 
-      {tab === "race"   && <Race runnerOk={runnerOk} />}
-      {tab === "badges" && <Badges />}
+      {tab === "race"    && <Race runnerOk={runnerOk} />}
+      {tab === "quiz"    && <Quiz />}
+      {tab === "sandbox" && <Sandbox />}
+      {tab === "badges"  && <Badges />}
     </main>
   );
 }

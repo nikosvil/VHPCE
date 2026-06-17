@@ -21,7 +21,7 @@ This file is the resume point: what's done, how to run it, what changed, and nex
 | **Cloud** | FastAPI gateway + Redis/Arq job queue; both producers async submit/poll; stdlib runner retired | ✅ done |
 | **P3** | MPI execution (`{kind:"mpi"}` → `vhpce-mpi`) + "MPI Halo Exchange" experiment (strong vs weak) | ✅ done |
 | **P4** | GPU/CUDA (`{kind:"cuda"}` → `vhpce-cuda`, RTX 5060) + GPU Occupancy, Coalescing, Divergence, Atomics | ✅ done |
-| **Engagement** | Intro, Start (predict-before-you-run), Compare, Play/Race, Reference Essentials + ~190 entries, Playground predict + diagnostics + thread-count explorer, predict streaks + badge system | ✅ done (quiz + Amdahl/Gustafson sandbox in next PR) |
+| **Engagement** | Intro, Start (predict-before-you-run), Compare, Play (Race + Quiz + Sandbox + Badges), Reference Essentials + ~190 entries, Playground predict + diagnostics + thread-count explorer, badge + streak system | ✅ done |
 | **Rollout** | LICENSE (AGPL-3.0), rewritten README, SETUP.md, CI (GitHub Actions), devcontainer (Codespaces) | ✅ done |
 | P5 | Engineering domain modules, classrooms/LMS, K8s autoscaling, true PMU counters | ⬜ not started |
 
@@ -105,8 +105,10 @@ Playground code) go through one async backend; **Model mode is the only offline 
   bottleneck; **thread-count explorer** (per-point breakdown); opt-in **cachegrind** cache-miss
   profiling (D1/LLd miss rates).
 - **Play** (`/play`) — the fun-first corner: **⚡ Race** pits two kernel variants head-to-head
-  (predict the winner, then run both). More games land here over time. Badge/streak system rewards
-  correct predictions across Start, Playground, and Flagship experiments.
+  (predict the winner, then run both); **🧩 Quiz** tests your bottleneck instincts;
+  **🔬 Sandbox** lets you explore Amdahl's and Gustafson's laws interactively; **🏅 Badges**
+  rewards correct predictions across Start, Playground, and Flagship experiments and tracks
+  prediction streaks.
 - **Cloud gateway** (`services/api`) — **FastAPI + Redis + Arq**, run via `docker-compose`. The
   Flagship's Measured mode and the Playground both **submit jobs and poll**: `POST /api/jobs`
   (`{kind:"bench"|"code", ...}`) → `GET /api/jobs/{id}`. The Arq worker (`max_jobs=1`, serialized for
@@ -221,8 +223,8 @@ vhpce/
   guide), devcontainer (Codespaces), CI.
 - ✅ **Engagement layer** — Intro, Start (predict), Compare, Play/Race, badges/streaks system,
   Playground predict + diagnostics + thread-count explorer, Reference Essentials filter.
-- **Next PR (`feat/badges-pr30`)** — guess-the-bottleneck quiz (#31) + Amdahl & Gustafson
-  interactive sandbox (#32) + `explain` bugfix (undefined peak in falseSharing/mpiHalo).
+- ✅ **Engagement Play layer** — Race, Quiz, Amdahl/Gustafson Sandbox, Badges/streaks; `explain`
+  bugfix (undefined peak guard in falseSharing/mpiHalo).
 
 ---
 
@@ -230,10 +232,7 @@ vhpce/
 
 The core product and engagement layer are complete. Candidate next steps:
 
-1. **Merge `feat/badges-pr30`** — guess-the-bottleneck quiz, Amdahl & Gustafson interactive
-   sandbox, and a bugfix for `explain.falseSharing`/`mpiHalo` when `r.peak` is undefined.
-
-2. **Engineering-domain modules (P5).** FEM/FDTD/CFD/stencil/FFT mini-labs with interactive
+1. **Engineering-domain modules (P5).** FEM/FDTD/CFD/stencil/FFT mini-labs with interactive
    domain decomposition and convergence plots, built on the same `ProfileResult` seam and the
    gateway job kinds (OpenMP/MPI/CUDA) already in place.
 

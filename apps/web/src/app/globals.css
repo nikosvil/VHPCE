@@ -261,6 +261,39 @@ footer.note code { font-family: var(--mono); color: var(--muted); background: #0
 .ref-cat-tag { font-size: 11px; color: var(--dim); }
 .ref-sig { margin: 0 0 12px; }
 
+/* ---- Amdahl / Gustafson sandbox ---- */
+.sbox-controls { display: flex; flex-direction: column; gap: 14px; }
+.sbox-slider-block { display: flex; flex-direction: column; gap: 6px; }
+.sbox-slider-label { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; color: var(--muted); }
+.sbox-slider-ends { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--dim); margin-top: 2px; }
+.sbox-row2 { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+.sbox-group { display: flex; flex-direction: column; gap: 6px; }
+.sbox-group-label { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .8px; font-weight: 600; }
+.sbox-chart { border: 1px solid var(--line); border-radius: 10px; padding: 10px 6px 4px; background: var(--panel2); }
+.sbox-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; align-items: center; }
+.sbox-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+
+/* ---- Guess-the-Bottleneck quiz ---- */
+.quiz-progress { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+.quiz-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; transition: .2s; }
+.quiz-dot.on   { background: var(--accent); box-shadow: 0 0 8px rgba(76,201,240,.5); }
+.quiz-dot.done { background: var(--good); }
+.quiz-count { font-size: 11px; color: var(--dim); margin-left: 6px; }
+.quiz-score { font-size: 11px; color: var(--muted); margin-left: auto; }
+.quiz-layout { display: grid; grid-template-columns: 1fr 230px; gap: 14px; align-items: start; margin-bottom: 4px; }
+@media (max-width: 780px) { .quiz-layout { grid-template-columns: 1fr; } }
+.quiz-chart { border: 1px solid var(--line); border-radius: 10px; padding: 10px 6px 4px; background: var(--panel2); }
+.quiz-choices { display: flex; flex-direction: column; gap: 7px; }
+.quiz-choice { border: 1px solid var(--line); background: var(--panel2); color: var(--text); padding: 10px 12px; border-radius: 9px; cursor: pointer; font-size: 12.5px; font-family: var(--sans); text-align: left; transition: .12s; line-height: 1.4; }
+.quiz-choice:hover:not(:disabled) { border-color: var(--accent); background: rgba(76,201,240,.07); }
+.quiz-choice.correct { border-color: var(--good) !important; background: rgba(61,220,151,.1) !important; color: var(--good) !important; font-weight: 600; }
+.quiz-choice.wrong   { border-color: var(--bad)  !important; background: rgba(255,93,115,.08) !important; color: var(--bad)  !important; }
+.quiz-review { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; }
+.quiz-review-row { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 7px 10px; border-radius: 8px; }
+.quiz-review-row.hit  { background: rgba(61,220,151,.08); color: var(--good); }
+.quiz-review-row.miss { background: rgba(255,93,115,.08); color: var(--bad);  }
+.quiz-review-label { color: var(--text); }
+
 /* ---- Badge toast (global, fixed bottom-right) ---- */
 .badge-toast {
   position: fixed; bottom: 24px; right: 24px; z-index: 9999;

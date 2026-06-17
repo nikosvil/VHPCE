@@ -10,8 +10,8 @@ type ExplainFn = (r: ExperimentResult) => Explanation;
 
 export const Explain: Record<string, ExplainFn> = {
   falseSharing(r) {
-    const c = r.current, peak = r.peak!, padded = r.params.padded;
-    if (padded)
+    const c = r.current, peak = r.peak, padded = r.params.padded;
+    if (padded || !peak)
       return {
         sev: "info",
         what: `Padded: speedup reaches <b>${fmt(c.speedup, 1)}×</b> at ${c.x} threads — close to the ideal ${c.x}×.`,
@@ -22,7 +22,7 @@ export const Explain: Record<string, ExplainFn> = {
     return {
       sev: "critical",
       what: `Speedup peaks at only <b>${fmt(peak.speedup, 1)}×</b> around ${peak.x} threads, then <b>falls to ${fmt(c.speedup, 1)}×</b> at ${c.x}. Adding threads makes it slower.`,
-      why: `All ${c.x} counters share <b>one 64-byte cache line</b>. Every increment invalidates that line in every other core, so it ping-pongs across cores over the bus — coherence traffic grows ~linearly with thread count and now dominates (${fmt(r.coh!, 0)} ms of the ${fmt(c.time, 0)} ms runtime).`,
+      why: `All ${c.x} counters share <b>one 64-byte cache line</b>. Every increment invalidates that line in every other core, so it ping-pongs across cores over the bus — coherence traffic grows ~linearly with thread count and now dominates (${fmt(r.coh ?? 0, 0)} ms of the ${fmt(c.time, 0)} ms runtime).`,
       how: `<b>Pad/align each thread's counter to its own cache line</b> (64-byte alignment, or per-thread padded struct). Flip "Pad to cache line".`,
       exp: `Near-linear speedup restored (~${c.x}× at ${c.x} threads); coherence stall → ~0%.`,
     };
@@ -82,8 +82,8 @@ export const Explain: Record<string, ExplainFn> = {
     };
   },
   mpiHalo(r) {
-    const c = r.current, weak = r.params.mode === "weak", commPct = r.idlePct ?? 0, peak = r.peak!;
-    if (weak)
+    const c = r.current, weak = r.params.mode === "weak", commPct = r.idlePct ?? 0, peak = r.peak;
+    if (weak || !peak)
       return {
         sev: c.efficiency > 0.7 ? "info" : "warn",
         what: `Weak scaling: as the grid grows with the ranks, scaled speedup reaches <b>${fmt(c.speedup, 1)}×</b> on ${c.x} ranks at <b>${fmt(c.efficiency * 100, 0)}% efficiency</b> — close to ideal.`,
