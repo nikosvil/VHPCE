@@ -49,9 +49,11 @@ shared data contract, and two interchangeable data sources (an in-browser physic
   run a thread-count sweep in a locked-down Docker sandbox. Results come with plain-language
   diagnostics that route you to the Flagship experiment explaining the bottleneck, a thread-count
   explorer, and optional cachegrind cache-miss profiling.
-- **[Play](apps/web/src/components/Play.tsx)** (`/play`) — the fun-first corner: race two kernel
-  variants head-to-head, predicting the winner before the real numbers come in (more games land
-  here over time).
+- **[Play](apps/web/src/components/Play.tsx)** (`/play`) — the fun-first corner: **⚡ Race**
+  pits two kernel variants head-to-head (predict the winner, then run both); **🧩 Quiz** tests
+  your bottleneck instincts; **🔬 Sandbox** lets you explore Amdahl's and Gustafson's laws
+  interactively; **🏅 Badges** rewards correct predictions across Start, Playground, and
+  Flagship experiments and tracks your prediction streaks.
 
 Everything above shares one data contract — `ProfileResult`/`ExperimentResult`
 (`@vhpce/profile-schema`) — so the **model** (runs entirely in your browser) and **measured**

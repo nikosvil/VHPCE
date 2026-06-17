@@ -137,12 +137,11 @@ the Slurm bridge for real clusters. These bare-metal/cloud nodes also unlock **t
 **DoD:** an instructor runs a class through a "speed up this code" challenge backed by real
 cluster execution.
 
-**Status (2026-06-17) — gamification layer partially landed.** The `/play` hub, head-to-head
-kernel race, predict-before-you-run mechanic (across Start / Playground / Flagship), and a
-badge + streak system for correct predictions are built and merged. A guess-the-bottleneck quiz
-and an Amdahl & Gustafson interactive sandbox are in the next PR (`feat/badges-pr30`).
-Engineering domain modules (FEM/FDTD/CFD), classrooms/LMS, K8s autoscaling, and PMU counters
-remain future work.
+**Status (2026-06-17) — gamification layer complete.** The `/play` hub ships four games:
+**⚡ Race** (head-to-head kernel comparison), **🧩 Quiz** (guess-the-bottleneck),
+**🔬 Sandbox** (Amdahl & Gustafson interactive explorer), and **🏅 Badges** (predict-before-
+you-run reward system across Start / Playground / Flagship). Engineering domain modules
+(FEM/FDTD/CFD), classrooms/LMS, K8s autoscaling, and PMU counters remain future work.
 
 ---
 
