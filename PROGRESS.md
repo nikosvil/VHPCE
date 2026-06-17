@@ -1,10 +1,10 @@
 # VHPCE — Progress Snapshot
 
-_Last updated: 2026-06-04 · branch `cuda-phase` (off `mpi-phase` → `cloud-phase`)_
+_Last updated: 2026-06-17 · branch `main`_
 
-A working build of **Visual HPC for Engineers** — an interactive performance laboratory.
-**Phases P0, P1, P2, the Cloud Phase (FastAPI gateway + Redis/Arq queue), P3 (MPI), and P4 (GPU/CUDA)
-are complete.** This file is the resume point: what's done, how to run it, what changed, and next steps.
+**Visual HPC for Engineers** — an interactive performance laboratory.
+**Phases P0–P4 + the Cloud Phase + the engagement & GPU-lesson layer are complete.**
+This file is the resume point: what's done, how to run it, what changed, and next steps.
 
 > The design contract lives in `docs/` (`01-architecture.md` … `06-data-contracts.md`) and the
 > running decisions log is in `README.md`. This file is the operational summary.
@@ -17,11 +17,13 @@ are complete.** This file is the resume point: what's done, how to run it, what 
 |------|-------|--------|
 | **P0** | Zero-build flagship "Why Parallel Code Gets Slower" (Canvas2D + D3) | ✅ done (`apps/flagship-zero-build/index.html`) |
 | **P1** | Next.js monorepo; flagship on shared packages; Model\|Measured; 3D hero scenes; Ask-the-AI | ✅ done |
-| **P2** | Code Playground (arbitrary OpenMP C in a locked-down Docker container) + cachegrind | ✅ **complete for local use** |
-| **Cloud** | FastAPI gateway + Redis/Arq job queue; both producers async submit/poll; stdlib runner retired | ✅ **done** |
-| **P3** | MPI execution (`{kind:"mpi"}` → `vhpce-mpi`) + "MPI Halo Exchange" experiment (strong vs weak) | ✅ **done** |
-| **P4** | GPU/CUDA (`{kind:"cuda"}` → `vhpce-cuda`, RTX 5060) + "GPU Occupancy" experiment (register pressure) | ✅ **done** |
-| P5 | Engineering modules, gamification, classrooms, cloud scale (incl. the deferred queue) | ⬜ not started |
+| **P2** | Code Playground (arbitrary OpenMP C in a locked-down Docker container) + cachegrind | ✅ done |
+| **Cloud** | FastAPI gateway + Redis/Arq job queue; both producers async submit/poll; stdlib runner retired | ✅ done |
+| **P3** | MPI execution (`{kind:"mpi"}` → `vhpce-mpi`) + "MPI Halo Exchange" experiment (strong vs weak) | ✅ done |
+| **P4** | GPU/CUDA (`{kind:"cuda"}` → `vhpce-cuda`, RTX 5060) + GPU Occupancy, Coalescing, Divergence, Atomics | ✅ done |
+| **Engagement** | Intro, Start (predict-before-you-run), Compare, Play/Race, Reference Essentials + ~190 entries, Playground predict + diagnostics + thread-count explorer, predict streaks + badge system | ✅ done (quiz + Amdahl/Gustafson sandbox in next PR) |
+| **Rollout** | LICENSE (AGPL-3.0), rewritten README, SETUP.md, CI (GitHub Actions), devcontainer (Codespaces) | ✅ done |
+| P5 | Engineering domain modules, classrooms/LMS, K8s autoscaling, true PMU counters | ⬜ not started |
 
 ### The core idea that holds it together
 One **`ProfileResult` seam** (`@vhpce/profile-schema`). Two producers — the in-browser
@@ -34,6 +36,12 @@ Playground code) go through one async backend; **Model mode is the only offline 
 
 ## 2. What's built (concise)
 
+- **Introduction** (`/intro`) — the front door: the one big idea (model vs. measured), and a
+  guided map of every section with what it does and how long it takes. No backend.
+- **Start Here** (`/start`) — three live runs on real cores that tell the whole story in five
+  minutes: parallel works (`hello`), the naive sum doesn't scale (atomic synchronization
+  bottleneck), and the one-line fix (reduction) does. Each step is a **predict-before-you-run**
+  — guess the speedup before hitting Run, then compare to the measured result.
 - **Learn the Basics** (`/learn`) — a beginner on-ramp (no backend, offline): six animated concept
   cards for **how OpenMP & MPI actually work** — fork–join, parallel-for loop splitting, shared vs
   private (race→reduction), MPI ranks & separate memory, send/recv, and collectives (bcast/scatter/
@@ -43,7 +51,7 @@ Playground code) go through one async backend; **Model mode is the only offline 
   OpenMP cards → a runnable Playground example (`/playground?ex=…`), MPI cards → the measured
   Flagship experiment (`/?exp=mpiHalo`).
 - **Command Reference** (`/reference`) — a searchable, filterable library of **OpenMP, MPI & OpenACC
-  directives/commands** (~158 entries: OpenMP 72 / MPI 59 / OpenACC 27 — incl. OpenMP `target`
+  directives/commands** (~190 entries: OpenMP 72 / MPI 59 / OpenACC 27 — incl. OpenMP `target`
   offloading + advanced (metadirective/declare variant) + runtime env; MPI one-sided RMA (+ shared
   windows), parallel I/O, neighborhood collectives, persistent requests, graph topologies, dynamic
   processes), each with a "smart" looping animation, syntax, a
@@ -56,6 +64,7 @@ Playground code) go through one async backend; **Model mode is the only offline 
   `/reference?id=<entryId>`. The selected entry follows the active filter/search. A **C | Fortran**
   toggle shows each signature in both languages (derived: `!$omp`/`!$acc` sentinels + `end` directives,
   `for`→`do`; MPI `call …(…, ierror)` with Fortran type names — overridable via `signatureF`).
+  A **★ Essentials** filter narrows the full library to the must-knows for newcomers.
 - **Heat Lab** (`/lab`) — an interactive **2-D heat-equation** mini-lab (P5 domain module): an explicit
   finite-difference (FTCS Jacobi) stencil on a 128×128 grid, animated as a heatmap (offline, no
   backend). Controls: play/step/reset, diffusivity α (with a visible α≤0.25 stability cliff), speed.
@@ -65,32 +74,39 @@ Playground code) go through one async backend; **Model mode is the only offline 
   → `MPI_Sendrecv` halo exchange → CUDA kernel) with links to the matching Reference entry + Flagship
   experiment — the direct tie from the picture to real OpenMP/MPI/GPU code. A live **convergence
   plot** (log-scale max |Δu| per step) shows the solver converging — and **diverging** (red) when α>0.25.
-- **Flagship** (`/`) — five experiments (false sharing, synchronization, bandwidth saturation,
-  load imbalance, **MPI halo exchange**), each with: model + **measured** data behind a
-  **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a **2D | 3D**
-  visualization toggle (Canvas2D scenes in `@vhpce/viz`; R3F/Three.js hero scenes per experiment);
-  D3 scaling chart (+ roofline for bandwidth). The scaling axis generalizes to **ranks** for MPI
-  (`ExperimentResult.xUnits`); weak scaling uses scaled-speedup/efficiency in `buildResult`.
-- **MPI Halo Exchange** (P3) — a 1-D Jacobi stencil with ring halo exchange, swept across ranks.
+- **Flagship** (`/`) — **nine experiments** (false sharing, synchronization, bandwidth saturation,
+  load imbalance, MPI halo exchange, GPU occupancy, GPU coalescing, GPU divergence, GPU atomics),
+  each with: model + **measured** data behind a **Model | Measured** toggle; a deterministic
+  what/why/how/expected diagnosis; a **2D | 3D** visualization toggle; D3 scaling chart (+
+  roofline for bandwidth, occupancy chart for CUDA). The scaling axis generalizes to **ranks** for
+  MPI (`ExperimentResult.xUnits`); weak scaling uses scaled-speedup/efficiency in `buildResult`.
+- **MPI Halo Exchange** — a 1-D Jacobi stencil with ring halo exchange, swept across ranks.
   The **strong vs weak** toggle is the lesson: strong (fixed grid) saturates as the comm fraction
-  grows; weak (grid ∝ ranks) holds efficiency near ideal. Measured runs go through the gateway's
-  `{kind:"mpi"}` job → `vhpce-mpi` (OpenMPI, `mpirun` rank sweep). The model shows the vivid
-  comm wall; measured shows this one node's shared-memory reality (gentler) — the seam carries both.
-- **GPU Occupancy** (P4) — a CUDA kernel swept across **threads/block (32→1024)** on the **RTX 5060**,
-  with a **light vs heavy register** toggle. Heavy is register-limited (the SM's register file fills
-  before its warp slots → low occupancy, worse at large blocks); light restores occupancy. The chart
-  is a dedicated `drawOccupancy` (occupancy + performance vs block size, best block marked). Measured
-  occupancy is **real** — the kernel queries the CUDA Occupancy API on the device (no Nsight needed).
-  Gateway `{kind:"cuda"}` job → `docker run --gpus all vhpce-cuda`. GPU passthrough into the container
-  is verified working.
+  grows; weak (grid ∝ ranks) holds efficiency near ideal. Measured: `{kind:"mpi"}` → `vhpce-mpi`.
+- **GPU Occupancy** — a CUDA kernel swept across **threads/block (32→1024)** on the **RTX 5060**,
+  with a **light vs heavy register** toggle. Heavy is register-limited (~33% occupancy); light
+  reaches ~100%. Occupancy is real — queried via the CUDA Occupancy API on the device. `{kind:"cuda"}`.
+- **GPU Coalescing** — stride sweep (1→32) exposing the memory-transaction cost of non-contiguous
+  warp access. Measured on the RTX 5060; model uses the transaction-count formula.
+- **GPU Divergence** — branch-path sweep (1→16) exposing warp serialization cost. Measured;
+  model uses the serialized-fraction formula.
+- **GPU Atomics** — concurrent-target sweep (1→24) exposing contention on shared-memory atomics.
+  Measured; model uses the queuing formula.
+- **Compare** (`/compare`) — the same kernel through both producers at once: textbook model (dashed)
+  overlaid on the measured run on real silicon (solid), with scenario knobs to see exactly where the
+  napkin math and the hardware agree — and where they diverge.
 - **Ask the AI** (`apps/web/src/app/api/ask/route.ts` + `AskAI.tsx`) — optional Claude panel
   (`claude-opus-4-8`, streaming), **grounded on the deterministic findings**; key via
   `ANTHROPIC_API_KEY` or a per-tab bring-your-own key; built-in explanations always on.
 - **Code Playground** (`/playground`) — Monaco editor → compile + thread-sweep arbitrary OpenMP C
-  in a **locked-down Docker container**; measured scaling + generic reading + **opt-in cachegrind**
-  cache-miss profiling (D1/LLd miss rates). A row of **one-click worked examples** (parallel sum,
-  hello-threads, false sharing, sync cost (atomic), STREAM triad) lets beginners run real code
-  without writing it; deep-linkable via `?ex=<id>` (the `/learn` + `/reference` pages point here).
+  in a **locked-down Docker container** (11 worked examples, deep-linkable via `?ex=<id>`).
+  **predict-before-you-run** (guess your speedup, then see the real numbers); **plain-language
+  diagnostics** with "what now?" routing to the exact Flagship experiment that explains the
+  bottleneck; **thread-count explorer** (per-point breakdown); opt-in **cachegrind** cache-miss
+  profiling (D1/LLd miss rates).
+- **Play** (`/play`) — the fun-first corner: **⚡ Race** pits two kernel variants head-to-head
+  (predict the winner, then run both). More games land here over time. Badge/streak system rewards
+  correct predictions across Start, Playground, and Flagship experiments.
 - **Cloud gateway** (`services/api`) — **FastAPI + Redis + Arq**, run via `docker-compose`. The
   Flagship's Measured mode and the Playground both **submit jobs and poll**: `POST /api/jobs`
   (`{kind:"bench"|"code", ...}`) → `GET /api/jobs/{id}`. The Arq worker (`max_jobs=1`, serialized for
@@ -127,9 +143,11 @@ pnpm --filter web dev                                                          #
 
 - **Ports:** web `:3000`, gateway api `:8000`, redis `:6379`. Browser reaches the gateway at
   `http://localhost:8000` (override with `NEXT_PUBLIC_VHPCE_API`).
-- **Routes:** `/learn` (Basics — concept animations), `/reference` (command library — offline),
-  `/lab` (Heat-equation mini-lab — offline), `/` (Flagship), `/playground` (Code Playground),
-  `POST|GET /api/ask` (LLM, Next route).
+- **Routes:** `/intro` (Introduction — orientation), `/start` (Start Here — guided first runs),
+  `/learn` (Basics — concept animations), `/reference` (command library — offline),
+  `/lab` (Heat-equation mini-lab — offline), `/` (Flagship — 9 experiments),
+  `/compare` (model vs measured overlay), `/playground` (Code Playground),
+  `/play` (Play hub — Race game + more), `POST|GET /api/ask` (LLM, Next route).
   Gateway: `GET /api/health`, `POST /api/jobs`, `GET /api/jobs/{id}`.
 - **Ask-the-AI:** set `ANTHROPIC_API_KEY` in `apps/web/.env.local` (then restart) **or** paste a key
   in the panel (kept per-tab only).
@@ -153,13 +171,17 @@ vhpce/
 │        │       playground/page.tsx (→Playground) · api/ask/route.ts (LLM, streaming)
 │        ├─ lib/runner.ts          gateway client: health() + runJob() submit/poll (Flagship + Playground)
 │        └─ components/
-│           ├─ Flagship.tsx        flagship shell: state, Model|Measured, recompute, charts, AskAI
-│           ├─ Playground.tsx      Monaco editor + run/profile + result + cache panel (+ worked examples)
+│           ├─ Intro.tsx           /intro orientation page — one big idea + section map
+│           ├─ FirstRun.tsx        /start guided first runs with predict-before-you-run
+│           ├─ Flagship.tsx        flagship shell: 9 experiments, Model|Measured, charts, AskAI
+│           ├─ Compare.tsx         /compare model-vs-measured overlay for the same kernel
+│           ├─ Play.tsx            /play hub (tabs) + play/Race.tsx head-to-head kernel race
+│           ├─ Playground.tsx      Monaco editor + predict + run/profile + diagnostics + thread explorer
 │           ├─ AskAI.tsx           streaming LLM panel (grounded)
-│           ├─ Nav.tsx             top nav (Learn | Reference | Heat Lab | Flagship | Playground)
+│           ├─ Nav.tsx             top nav (Intro | Start | Learn | Reference | Lab | Flagship | Compare | Playground | Play)
 │           ├─ Lab.tsx             /lab 2-D heat-equation sim + domain-decomposition overlay
 │           ├─ Learn.tsx           /learn beginner concept cards (+ learn/scenes.ts Canvas animations)
-│           ├─ Reference.tsx       /reference command library (+ reference/archetypes.ts + entries.ts)
+│           ├─ Reference.tsx       /reference command library (+ reference/archetypes.ts + entries.ts + Essentials filter)
 │           ├─ Term.tsx · glossary.ts   hover-glossary tooltips (/reference + Flagship/Playground metric labels & hints)
 │           ├─ Glossed.tsx          auto-glosser: wraps glossary terms in any prose string with <Term> (Reference/Learn/Playground)
 │           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance,Mpi,Cuda}Scene3D
@@ -190,39 +212,35 @@ vhpce/
 
 ---
 
-## 5. Pending decisions / triggers
+## 5. Status summary
 
-- ✅ **"Go with the Cloud Phase" — done.** FastAPI gateway + Redis + Arq worker
-  (`services/api`, `infra/docker/compose.yml`, docker-socket-mounted). **Both** producers now
-  submit/poll; the stdlib runner is retired; verified end-to-end (API + browser) on this machine.
-- **P4 (GPU/CUDA) is available locally** — RTX 5060 + CUDA passthrough already confirmed in WSL.
-- Git identity was set to `nikos <nikosvil@hotmail.com>` (history re-authored). No CI/secrets yet.
+- ✅ **Cloud Phase** — FastAPI + Redis + Arq; both producers submit/poll; stdlib runner retired.
+- ✅ **GPU/CUDA** — RTX 5060 passthrough; Occupancy, Coalescing, Divergence, Atomics all measured.
+- ✅ **CI** — GitHub Actions (`ci.yml`): install + typecheck + lint + build on every push/PR.
+- ✅ **Global rollout** — LICENSE (AGPL-3.0), README (front door), SETUP.md (multi-OS/tier setup
+  guide), devcontainer (Codespaces), CI.
+- ✅ **Engagement layer** — Intro, Start (predict), Compare, Play/Race, badges/streaks system,
+  Playground predict + diagnostics + thread-count explorer, Reference Essentials filter.
+- **Next PR (`feat/badges-pr30`)** — guess-the-bottleneck quiz (#31) + Amdahl & Gustafson
+  interactive sandbox (#32) + `explain` bugfix (undefined peak in falseSharing/mpiHalo).
 
 ---
 
 ## 6. Next implementation steps
 
-Phases P0–P4 + the Cloud gateway are all done — four execution models (OpenMP, arbitrary code, MPI,
-CUDA) flow through one seam — plus a beginner layer (Learn → Reference → Playground → Flagship).
-Candidate next steps, in rough priority:
+The core product and engagement layer are complete. Candidate next steps:
 
-1. **Reference long tail + glossary reach (newcomer aids continuation).** OpenACC is now seeded
-   (`offload`/`accData`/`gangs` archetypes + ~21 entries). Next: flesh out the long tail of
-   OpenMP/MPI/OpenACC entries (clauses, less-common calls), sprinkle `<Term>` glossary tooltips into
-   the Flagship/Playground prose, and consider per-entry runnable snippets beyond the four examples.
+1. **Merge `feat/badges-pr30`** — guess-the-bottleneck quiz, Amdahl & Gustafson interactive
+   sandbox, and a bugfix for `explain.falseSharing`/`mpiHalo` when `r.peak` is undefined.
 
-2. **Deeper GPU lessons reusing the cuda path.** More `{kind:"cuda"}` experiments — memory
-   **coalescing** (coalesced vs strided), **warp divergence**, shared-memory bank conflicts — each a
-   new kernel in `occupancy.cu`/a sibling + an `EXPERIMENTS` entry (plumbing already exists).
+2. **Engineering-domain modules (P5).** FEM/FDTD/CFD/stencil/FFT mini-labs with interactive
+   domain decomposition and convergence plots, built on the same `ProfileResult` seam and the
+   gateway job kinds (OpenMP/MPI/CUDA) already in place.
 
-2. **Engineering-domain modules (P5).** FEM/FDTD/CFD/stencil/FFT mini-labs with interactive domain
-   decomposition and convergence plots, built on the same `ProfileResult` seam and the gateway job
-   kinds (OpenMP/MPI/CUDA) already in place.
-
-3. **Gamification + classrooms + true cloud scale (P5).** "Speed up this code" challenges with
-   scores/badges; multi-user — raise the worker's `max_jobs` / add replicas (the queue already
-   supports it), move sandboxes to K8s Jobs, and unlock **true PMU counters** (perf/LIKWID) on a
-   bare-metal/cloud node (WSL2 has no host PMU; cachegrind + the occupancy API are the local stand-ins).
+3. **Classrooms + true cloud scale (P5).** Multi-user — raise the worker's `max_jobs` / add
+   replicas (the queue already supports it), move sandboxes to K8s Jobs, and unlock **true PMU
+   counters** (perf/LIKWID) on a bare-metal/cloud node (WSL2 has no host PMU; cachegrind + the
+   CUDA Occupancy API are the local stand-ins). LMS integration for classroom deployments.
 
 ---
 

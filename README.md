@@ -15,22 +15,43 @@ behind the same UI.
 
 ## What's inside
 
+A guided path from "what is parallelism" to "why doesn't *my* code scale" — nine pages, one
+shared data contract, and two interchangeable data sources (an in-browser physics **model**, and
+**measured** runs on real CPU/GPU cores):
+
+- **[Introduction](apps/web/src/components/Intro.tsx)** (`/intro`) — the front door: the one big
+  idea (model vs. measured), and a map of every page below with what it does and how long it takes.
+- **[Start Here](apps/web/src/components/FirstRun.tsx)** (`/start`) — three live runs on real
+  cores that tell the whole story in five minutes: parallel works, the naive version doesn't
+  scale (a synchronization bottleneck), and the one-line fix (reduction) does. Each step is a
+  **predict-before-you-run** — guess the speedup, then see the measured result.
 - **[Learn the Basics](apps/web/src/components/Learn.tsx)** (`/learn`) — six animated, offline
   walkthroughs of core OpenMP/MPI concepts (fork-join, parallel-for, shared vs. private,
   ranks/memory, send/recv, collectives), each linking onward to a runnable example or experiment.
 - **[Command Reference](apps/web/src/app/reference)** (`/reference`) — a searchable library of
-  ~158 OpenMP/MPI/OpenACC directives, each with a looping animation, a plain-English summary, a
-  C\|Fortran toggle, and a "▶ Run in the Playground" link.
+  ~190 OpenMP/MPI/OpenACC directives, each with a looping animation, a plain-English summary, a
+  C\|Fortran toggle, and a "▶ Run in the Playground" link. A **★ Essentials** filter narrows the
+  full library down to the must-knows for newcomers.
 - **[Heat Lab](apps/web/src/components/Lab.tsx)** (`/lab`) — an interactive 2-D heat-equation
   solver with a domain-decomposition overlay (serial / OpenMP / MPI / GPU) that ties the picture
   to real stencil code, plus a live convergence plot.
-- **[Flagship](apps/web/src/components/Flagship.tsx)** (`/`) — six experiments (false sharing,
-  synchronization, bandwidth saturation, load imbalance, MPI halo exchange, GPU occupancy), each
-  with a **Model | Measured** toggle, a 2D\|3D visualization, a scaling chart, and a
-  deterministic what/why/how/expected diagnosis (+ optional "Ask the AI" panel).
+- **[Flagship](apps/web/src/components/Flagship.tsx)** (`/`) — nine experiments (false sharing,
+  synchronization, bandwidth saturation, load imbalance, MPI halo exchange, GPU occupancy, GPU
+  coalescing, GPU divergence, GPU atomics), each with a **Model | Measured** toggle, a 2D\|3D
+  visualization, a scaling chart, and a deterministic what/why/how/expected diagnosis (+ optional
+  "Ask the AI" panel).
+- **[Compare](apps/web/src/components/Compare.tsx)** (`/compare`) — the same kernel through both
+  producers at once: the textbook model (dashed line) overlaid on the measured run on real
+  silicon (solid line), with scenario knobs to see exactly where the napkin math and the hardware
+  agree — and where, and why, they diverge.
 - **[Code Playground](apps/web/src/components/Playground.tsx)** (`/playground`) — write
-  arbitrary OpenMP C, compile it, and run a thread-count sweep in a locked-down Docker sandbox,
-  with optional cachegrind cache-miss profiling and one-click worked examples.
+  arbitrary OpenMP C (or load one of 11 worked examples), predict its speedup, then compile and
+  run a thread-count sweep in a locked-down Docker sandbox. Results come with plain-language
+  diagnostics that route you to the Flagship experiment explaining the bottleneck, a thread-count
+  explorer, and optional cachegrind cache-miss profiling.
+- **[Play](apps/web/src/components/Play.tsx)** (`/play`) — the fun-first corner: race two kernel
+  variants head-to-head, predicting the winner before the real numbers come in (more games land
+  here over time).
 
 Everything above shares one data contract — `ProfileResult`/`ExperimentResult`
 (`@vhpce/profile-schema`) — so the **model** (runs entirely in your browser) and **measured**
@@ -55,6 +76,9 @@ cd VHPCE
 corepack enable && pnpm install
 pnpm --filter web dev          # → http://localhost:3000  (Model mode, no Docker needed)
 ```
+
+Open **http://localhost:3000/intro** for a guided tour of every page, or jump straight to
+**http://localhost:3000/start** for a 5-minute hands-on first run.
 
 **No local install at all?** Open this repo in **GitHub Codespaces** ("Code → Codespaces →
 Create codespace") — the [devcontainer](.devcontainer/devcontainer.json) installs everything
