@@ -1,4 +1,4 @@
-# Visual HPC for Engineers (VHPCE)
+# Visual HPC for Engineering students (VHPCE)
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A520.9-339933?logo=node.js&logoColor=white)
