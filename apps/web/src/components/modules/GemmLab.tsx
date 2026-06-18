@@ -144,7 +144,7 @@ export default function GemmLab() {
       const elapsed = ts - startTs;
       const { mode: m, nb: nb_ } = cfg.current;
       const TOTAL = N * N * N;   // 512 steps for N=8
-      const phase = Math.floor(elapsed * 0.18) % TOTAL;
+      const phase = Math.floor(elapsed * 0.006) % TOTAL;  // ~6 steps/s → 125ms per k-step
 
       let ci: number, cj: number, ck: number;
       let tile_A: [number, number, number, number] | null = null;
