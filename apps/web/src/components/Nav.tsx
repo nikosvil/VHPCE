@@ -14,7 +14,7 @@ export default function Nav() {
         <Link href="/start" className={p === "/start" ? "active" : ""}>Start</Link>
         <Link href="/learn" className={p === "/learn" ? "active" : ""}>Learn</Link>
         <Link href="/reference" className={p === "/reference" ? "active" : ""}>Reference</Link>
-        <Link href="/lab" className={p === "/lab" ? "active" : ""}>Heat Lab</Link>
+        <Link href="/modules" className={p.startsWith("/modules") || p === "/lab" ? "active" : ""}>Labs</Link>
         <Link href="/" className={p === "/" ? "active" : ""}>Flagship</Link>
         <Link href="/compare" className={p === "/compare" ? "active" : ""}>Compare</Link>
         <Link href="/playground" className={p === "/playground" ? "active" : ""}>Playground</Link>
