@@ -531,4 +531,402 @@ const atomics: SceneFn = (ctx, VW, VH, now, res) => {
   );
 };
 
-export const scenes: Record<string, SceneFn> = { falseSharing, synchronization, bandwidth, imbalance, mpiHalo, cuda, cudaCoalesce: coalesce, cudaDivergence: divergence, cudaAtomics: atomics };
+const numaEffects: SceneFn = (ctx, VW, VH, now, res) => {
+  const threads = Math.min((res.params.threads as number) ?? 24, 24);
+  const numaAware = !!(res.params.numaAware);
+  const col = numaAware ? C.good : C.bad;
+  const nc = Math.min(Math.ceil(threads / 2), 8);
+  const pad = 16, gap = 20, nodeW = (VW - pad * 2 - gap) / 2;
+  const n0x = pad, n1x = pad + nodeW + gap;
+  const nodeTop = 28, coreY = nodeTop + 14, coreH = 20, memY = VH - 50;
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`${threads} threads · NUMA binding ${numaAware ? "ON — local-only" : "OFF — remote hops"}`, VW / 2, 17);
+
+  for (let nd = 0; nd < 2; nd++) {
+    const nx = nd === 0 ? n0x : n1x;
+    rr(ctx, nx, nodeTop, nodeW, VH - nodeTop - 18, 8);
+    ctx.fillStyle = "#07101e"; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "#1a2f4a"; ctx.stroke();
+    ctx.fillStyle = C.dim; ctx.font = "600 9px ui-monospace, monospace"; ctx.textAlign = "center";
+    ctx.fillText("NODE " + nd, nx + nodeW / 2, nodeTop + 10);
+    const cw = Math.min(32, (nodeW - 10) / nc - 2);
+    for (let i = 0; i < nc; i++) {
+      chip(ctx, nx + 5 + i * (cw + 3), coreY, cw, coreH, "C" + (nd * nc + i), C.accent, 0);
+    }
+    rr(ctx, nx + 4, memY, nodeW - 8, 24, 5);
+    ctx.fillStyle = "#0c1728"; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = C.accent2; ctx.stroke();
+    ctx.fillStyle = C.accent2; ctx.font = "600 9px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("MEM" + nd, nx + nodeW / 2, memY + 12); ctx.textBaseline = "alphabetic";
+  }
+  const cw = Math.min(32, (nodeW - 10) / nc - 2);
+  for (let nd = 0; nd < 2; nd++) {
+    const nx = nd === 0 ? n0x : n1x;
+    const dstNd = numaAware ? nd : 1 - nd;
+    const dnx = dstNd === 0 ? n0x : n1x;
+    const isRemote = nd !== dstNd;
+    for (let i = 0; i < nc; i++) {
+      const phase = ((now * 0.00036 + (nd * nc + i) * 0.18) % 1);
+      const sx = nx + 5 + i * (cw + 3) + cw / 2, sy = coreY + coreH;
+      const dx = dnx + nodeW / 2, dy = memY;
+      let px, py;
+      if (isRemote) {
+        const mx = VW / 2, my = coreY - 12;
+        px = (1-phase)*(1-phase)*sx + 2*(1-phase)*phase*mx + phase*phase*dx;
+        py = (1-phase)*(1-phase)*sy + 2*(1-phase)*phase*my + phase*phase*dy;
+      } else {
+        px = sx + (dx - sx) * phase; py = sy + (dy - sy) * phase;
+      }
+      const pCol = isRemote ? C.bad : C.good;
+      ctx.fillStyle = pCol; ctx.shadowColor = pCol; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(px, py, 3, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+    }
+  }
+  ctx.fillStyle = col; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(numaAware ? "all local — ~80 ns · full bandwidth" : "remote hops — ~160 ns · half bandwidth", VW / 2, VH - 8);
+};
+
+const cacheHierarchy: SceneFn = (ctx, VW, VH, now, res) => {
+  const level = (res.params.level as string) ?? "DRAM";
+  const levels = [
+    { name: "L1",   size: "32 KB",  latency: "4 cy",   col: C.good,    w: 0.15 },
+    { name: "L2",   size: "256 KB", latency: "12 cy",  col: C.warn,    w: 0.38 },
+    { name: "L3",   size: "8 MB",   latency: "40 cy",  col: "#ff9a3c", w: 0.68 },
+    { name: "DRAM", size: "32 GB",  latency: "80 ns",  col: C.bad,     w: 1.0  },
+  ];
+  const activeIdx = Math.max(0, levels.findIndex(l => l.name === level));
+  const lv = levels[activeIdx];
+  const pad = 20, rowH = 34, gap = 8, top = 32;
+  const maxW = VW - pad * 2;
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`Working set in ${level} — ${lv.size} · ${lv.latency} access latency`, VW / 2, 18);
+
+  for (let i = 0; i < levels.length; i++) {
+    const l = levels[i], ly = top + i * (rowH + gap);
+    const lw = maxW * l.w, lx = pad + (maxW - lw) / 2;
+    const isActive = i === activeIdx;
+    rr(ctx, lx, ly, lw, rowH, 6); ctx.fillStyle = "#070e1a"; ctx.fill();
+    ctx.fillStyle = l.col; ctx.globalAlpha = isActive ? 0.22 + 0.15 * Math.sin(now / 300) : 0.07; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.lineWidth = isActive ? 2 : 1; ctx.strokeStyle = isActive ? l.col : "#162236";
+    if (isActive) { ctx.shadowColor = l.col; ctx.shadowBlur = 14; } ctx.stroke(); ctx.shadowBlur = 0;
+    ctx.fillStyle = l.col; ctx.font = `600 ${isActive ? 12 : 10}px ui-monospace, monospace`;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(l.name, lx + 10, ly + rowH / 2);
+    ctx.fillStyle = C.dim; ctx.font = "9px ui-monospace, monospace"; ctx.fillText(l.size, lx + 50, ly + rowH / 2);
+    ctx.textAlign = "right"; ctx.fillStyle = isActive ? l.col : C.dim; ctx.fillText(l.latency, lx + lw - 10, ly + rowH / 2);
+    ctx.textBaseline = "alphabetic";
+  }
+
+  // data particle bouncing into active level
+  const targetY = top + activeIdx * (rowH + gap) + rowH / 2;
+  const phase = (now % 2200) / 2200;
+  const particleY = (top - 18) + (targetY - (top - 18)) * Math.min(1, phase * 1.3);
+  ctx.fillStyle = lv.col; ctx.shadowColor = lv.col; ctx.shadowBlur = 10;
+  ctx.beginPath(); ctx.arc(VW / 2, particleY, 4, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+
+  const by = top + levels.length * (rowH + gap) + 14;
+  ctx.fillStyle = lv.col; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    activeIdx === 0 ? "hot in L1 — reuse every cycle, lowest latency" :
+    activeIdx === 1 ? "L2 hit — moderate latency, high throughput" :
+    activeIdx === 2 ? "L3 hit — shared cache, watch for eviction pressure" :
+                     "DRAM access — bandwidth-bound, high latency stalls",
+    VW / 2, by
+  );
+};
+
+const simdVec: SceneFn = (ctx, VW, VH, now, res) => {
+  const width = (res.params.vectorWidth as number) ?? 8;
+  const layout = (res.params.layout as string) ?? "AoS";
+  const isSoA = layout === "SoA";
+  const col = isSoA ? C.good : C.warn;
+  const MAX = 16, pad = 22;
+  const ww = VW - pad * 2, cw = ww / MAX, laneH = 50;
+  const laneY = VH / 2 - laneH / 2 - 10;
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`${width}-wide SIMD · ${layout}: ${isSoA ? "all lanes fire together" : "scatter-gather, sequential"}`, VW / 2, 18);
+
+  for (let i = 0; i < MAX; i++) {
+    const active = i < width;
+    const x = pad + i * cw;
+    let alpha = 0;
+    if (active) {
+      if (isSoA) {
+        alpha = 0.3 + 0.35 * Math.sin(now / 240);
+      } else {
+        const delay = i / width;
+        const phase = ((now * 0.00055 - delay + 10) % 1);
+        alpha = 0.3 + 0.5 * Math.max(0, Math.sin(phase * Math.PI * 2));
+      }
+    }
+    rr(ctx, x + 1, laneY, cw - 2, laneH, 4);
+    ctx.fillStyle = active ? "#0b1824" : "#060c14"; ctx.fill();
+    if (active && alpha > 0) { ctx.fillStyle = col; ctx.globalAlpha = Math.max(0, alpha); ctx.fill(); ctx.globalAlpha = 1; }
+    ctx.lineWidth = active ? 1.5 : 0.5; ctx.strokeStyle = active ? col : "#131e2c"; ctx.stroke();
+    ctx.fillStyle = active ? col : C.dim; ctx.font = `${active ? "600" : "400"} 9px ui-monospace, monospace`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("L" + i, x + cw / 2, laneY + laneH / 2); ctx.textBaseline = "alphabetic";
+  }
+
+  const bracketY = laneY + laneH + 8;
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(pad + 1, bracketY); ctx.lineTo(pad + width * cw - 1, bracketY); ctx.stroke();
+  ctx.fillStyle = col; ctx.font = "600 10px ui-monospace, monospace"; ctx.textAlign = "center";
+  ctx.fillText(width + " lanes", pad + width * cw / 2, bracketY + 13);
+  if (width < MAX) {
+    ctx.fillStyle = C.dim; ctx.font = "9px ui-monospace, monospace";
+    ctx.fillText("unused", pad + width * cw + (MAX - width) * cw / 2, bracketY + 13);
+  }
+
+  ctx.fillStyle = col; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    isSoA ? "SoA: contiguous fields — SIMD load fills all lanes in 1 instruction" :
+             `AoS: interleaved structs — gather required, ~${Math.round(32 / width)}× extra loads`,
+    VW / 2, bracketY + 34
+  );
+};
+
+const openmpTasks: SceneFn = (ctx, VW, VH, now, res) => {
+  const threads = Math.min((res.params.threads as number) ?? 8, 10);
+  const granularity = (res.params.granularity as string) ?? "fine";
+  const taskCount = granularity === "fine" ? 16 : granularity === "medium" ? 8 : 4;
+  const taskH = granularity === "fine" ? 10 : granularity === "medium" ? 16 : 26;
+  const col = granularity === "fine" ? C.good : granularity === "medium" ? C.warn : C.bad;
+  const pad = 14, qW = 76, gap = 50, top = 30;
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`${threads} worker threads · ${granularity} granularity · ${taskCount} tasks`, VW / 2, 18);
+
+  ctx.fillStyle = C.dim; ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "center";
+  ctx.fillText("task queue", pad + qW / 2, top - 4);
+
+  for (let i = 0; i < taskCount; i++) {
+    const ty = top + i * (taskH + 3);
+    rr(ctx, pad, ty, qW, taskH, 3);
+    const active = ((now * 0.0004 + i * 0.11) % 1) < 0.28;
+    ctx.fillStyle = active ? "#0d1c2c" : "#07101c"; ctx.fill();
+    if (active) { ctx.fillStyle = col; ctx.globalAlpha = 0.28; ctx.fill(); ctx.globalAlpha = 1; }
+    ctx.lineWidth = 1; ctx.strokeStyle = active ? col : "#12202e"; ctx.stroke();
+    ctx.fillStyle = C.dim; ctx.font = "8px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("T" + i, pad + qW / 2, ty + taskH / 2); ctx.textBaseline = "alphabetic";
+  }
+
+  const wX = pad + qW + gap, wW = VW - wX - pad;
+  const wH = Math.min(22, (VH - 60) / threads - 3);
+  ctx.fillStyle = C.dim; ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "center";
+  ctx.fillText("workers", wX + wW / 2, top - 4);
+
+  for (let t = 0; t < threads; t++) {
+    const ty = top + t * (wH + 4);
+    const taskIdx = Math.floor(now * 0.0008 * threads + t * 2.1) % taskCount;
+    const busy = ((now * 0.0005 + t * 0.37) % 1) < 0.82;
+    rr(ctx, wX, ty, wW, wH, 4); ctx.fillStyle = "#07101c"; ctx.fill();
+    if (busy) { ctx.fillStyle = col; ctx.globalAlpha = 0.18 + 0.14 * Math.sin(now / 210 + t); ctx.fill(); ctx.globalAlpha = 1; }
+    ctx.lineWidth = 1; ctx.strokeStyle = busy ? col : "#12202e"; ctx.stroke();
+    ctx.fillStyle = busy ? col : C.dim; ctx.font = "9px ui-monospace, monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(`W${t}${busy ? " ← T" + taskIdx : " idle"}`, wX + 5, ty + wH / 2); ctx.textBaseline = "alphabetic";
+    if (busy) {
+      const srcY = top + taskIdx * (taskH + 3) + taskH / 2;
+      ctx.strokeStyle = col + "44"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pad + qW, srcY); ctx.bezierCurveTo(pad + qW + gap * 0.4, srcY, wX - gap * 0.4, ty + wH / 2, wX, ty + wH / 2); ctx.stroke();
+    }
+  }
+
+  const by = Math.min(top + taskCount * (taskH + 3), top + threads * (wH + 4)) + 24;
+  ctx.fillStyle = col; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    granularity === "fine" ? "fine tasks: great balance, scheduling overhead per task" :
+    granularity === "medium" ? "medium: balanced overhead vs. parallelism" :
+    "coarse tasks: low overhead, risk of thread starvation",
+    VW / 2, Math.min(by, VH - 8)
+  );
+};
+
+const cudaSharedMem: SceneFn = (ctx, VW, VH, now, res) => {
+  const stride = (res.params.bankStride as number) ?? 1;
+  const padding = !!(res.params.padding);
+  const BANKS = 32, THREADS = 32;
+  const pad = 18, ww = VW - pad * 2;
+  const bw = ww / BANKS, tw = ww / THREADS;
+  const threadY = 30, threadH = 14, bankY = VH - 58;
+
+  function bankOf(t: number) { return padding ? t % BANKS : (t * stride) % BANKS; }
+  const bankLoad: number[] = Array(BANKS).fill(0);
+  for (let t = 0; t < THREADS; t++) bankLoad[bankOf(t)]++;
+  const maxLoad = Math.max(...bankLoad);
+  const hasConflict = maxLoad > 1 && !padding;
+  const col = !hasConflict ? C.good : maxLoad > 4 ? C.bad : C.warn;
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    padding ? "padding ON: one extra element per row — always conflict-free" :
+    `stride ${stride}: thread t → bank (t×${stride})%32 — ${hasConflict ? maxLoad + "-way conflicts" : "conflict-free"}`,
+    VW / 2, 18
+  );
+
+  for (let t = 0; t < THREADS; t++) {
+    const x = pad + t * tw;
+    rr(ctx, x + 0.5, threadY, tw - 1, threadH, 2);
+    ctx.fillStyle = col; ctx.globalAlpha = 0.28 + 0.18 * Math.sin(now / 300 + t * 0.4); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.lineWidth = 0.5; ctx.strokeStyle = col; ctx.stroke();
+  }
+  ctx.fillStyle = C.dim; ctx.font = "8px ui-monospace, monospace"; ctx.textAlign = "left"; ctx.fillText("t0…t31", pad, threadY - 4);
+
+  for (let t = 0; t < THREADS; t++) {
+    const b = bankOf(t);
+    const sx = pad + t * tw + tw / 2, dx = pad + b * bw + bw / 2;
+    const load = bankLoad[b];
+    const lineCol = load > 1 && !padding ? (load > 4 ? "rgba(255,93,115,.3)" : "rgba(255,180,84,.3)") : "rgba(61,220,151,.25)";
+    ctx.strokeStyle = lineCol; ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(sx, threadY + threadH); ctx.lineTo(dx, bankY); ctx.stroke();
+  }
+
+  for (let b = 0; b < BANKS; b++) {
+    const bx = pad + b * bw, load = bankLoad[b];
+    const bCol = load > 1 && !padding ? (load > 4 ? C.bad : C.warn) : C.good;
+    const bh = Math.min(30, 8 + load * 5);
+    rr(ctx, bx + 0.5, bankY, bw - 1, bh, 3); ctx.fillStyle = "#0b1120"; ctx.fill();
+    ctx.fillStyle = bCol; ctx.globalAlpha = 0.28 + 0.22 * Math.abs(Math.sin(now / 380 + b * 0.3)); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.lineWidth = 1; ctx.strokeStyle = bCol; ctx.stroke();
+    if (load > 1 && !padding) {
+      ctx.fillStyle = bCol; ctx.font = "600 7px ui-monospace, monospace"; ctx.textAlign = "center";
+      ctx.fillText("×" + load, bx + bw / 2, bankY - 3);
+    }
+  }
+  ctx.fillStyle = C.dim; ctx.font = "8px ui-monospace, monospace"; ctx.textAlign = "left"; ctx.fillText("bank 0…31", pad, bankY + 36);
+
+  ctx.fillStyle = col; ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    !hasConflict ? (padding ? "padded rows: zero conflicts — 1 cycle shared mem access" : "conflict-free — all 32 banks in parallel") :
+    `${maxLoad}-way conflict — warp serializes into ${maxLoad} passes`,
+    VW / 2, VH - 8
+  );
+};
+
+const mpiCollective: SceneFn = (ctx, VW, VH, now, res) => {
+  const ranks = Math.min((res.params.ranks as number) ?? 8, 12);
+  const collective = (res.params.collective as string) ?? "alltoall";
+  const col = collective === "alltoall" ? C.bad : collective === "allreduce" ? C.warn : C.accent;
+  const pad = 28, nodeR = Math.min(14, (VW - pad * 2) / (ranks * 3));
+  const cy = VH * 0.42;
+  const xs = Array.from({ length: ranks }, (_, i) => ranks === 1 ? VW / 2 : pad + nodeR + i * (VW - pad * 2 - nodeR * 2) / (ranks - 1));
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`${ranks} ranks · MPI_${collective.charAt(0).toUpperCase() + collective.slice(1)}`, VW / 2, 18);
+
+  ctx.strokeStyle = "#0f1e30"; ctx.lineWidth = 1.5;
+  for (let i = 0; i < ranks - 1; i++) {
+    ctx.beginPath(); ctx.moveTo(xs[i] + nodeR, cy); ctx.lineTo(xs[i + 1] - nodeR, cy); ctx.stroke();
+  }
+
+  const speed = 0.00055;
+  const srcOf = (p: number): number => {
+    if (collective === "broadcast") return 0;
+    if (collective === "reduce") return 1 + (p % (ranks - 1));
+    if (collective === "allreduce") return p < ranks ? p : (p - ranks + 1) % ranks;
+    return Math.floor(p / (ranks - 1));
+  };
+  const dstOf = (p: number): number => {
+    if (collective === "broadcast") return 1 + (p % (ranks - 1));
+    if (collective === "reduce") return 0;
+    if (collective === "allreduce") return p < ranks ? (p + 1) % ranks : p - ranks;
+    const s = Math.floor(p / (ranks - 1)), off = p % (ranks - 1);
+    return off >= s ? off + 1 : off;
+  };
+  const nPairs = collective === "alltoall" ? ranks * (ranks - 1) : collective === "allreduce" ? ranks * 2 : ranks - 1;
+
+  for (let p = 0; p < nPairs; p++) {
+    const si = srcOf(p), di = dstOf(p);
+    if (si === di || si >= ranks || di >= ranks) continue;
+    const phase = ((now * speed + p / nPairs) % 1);
+    const sx = xs[si], dx = xs[di];
+    const mx = (sx + dx) / 2, my = cy - Math.abs(xs[si] - xs[di]) * 0.22 - 8;
+    const px = (1-phase)*(1-phase)*sx + 2*(1-phase)*phase*mx + phase*phase*dx;
+    const py = (1-phase)*(1-phase)*cy + 2*(1-phase)*phase*my + phase*phase*cy;
+    const pCol = collective === "broadcast" ? C.accent : collective === "reduce" ? C.accent2 : col;
+    ctx.fillStyle = pCol; ctx.shadowColor = pCol; ctx.shadowBlur = 7;
+    ctx.beginPath(); ctx.arc(px, py, 3, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+  }
+
+  for (let i = 0; i < ranks; i++) {
+    ctx.beginPath(); ctx.arc(xs[i], cy, nodeR, 0, 7);
+    ctx.fillStyle = "#0c1320"; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = i === 0 ? C.accent2 : C.accent; ctx.stroke();
+    ctx.fillStyle = i === 0 ? C.accent2 : C.accent; ctx.font = "600 9px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("r" + i, xs[i], cy); ctx.textBaseline = "alphabetic";
+  }
+
+  const legY = cy + nodeR + 22;
+  ctx.fillStyle = C.dim; ctx.font = "10px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(
+    collective === "broadcast"  ? "one root sends to all — O(log p) latency steps" :
+    collective === "reduce"     ? "all contribute, one root collects — tree-reduce" :
+    collective === "allreduce"  ? "ring allreduce — every rank gets the final result" :
+    `all-to-all — each rank sends ${ranks - 1} messages, O(p) cost`,
+    VW / 2, legY
+  );
+
+  const bwFrac = collective === "alltoall" ? Math.min(1, ranks / 8) : collective === "allreduce" ? 0.6 : 0.3;
+  const barY = legY + 16, barW = VW - pad * 2;
+  rr(ctx, pad, barY, barW, 12, 5); ctx.fillStyle = "#0a0f18"; ctx.fill();
+  rr(ctx, pad, barY, barW * bwFrac, 12, 5); ctx.fillStyle = col; ctx.globalAlpha = 0.5; ctx.fill(); ctx.globalAlpha = 1;
+  ctx.fillStyle = col; ctx.font = "600 11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("network pressure: " + Math.round(bwFrac * 100) + "%", VW / 2, barY + 26);
+};
+
+const hybridMpi: SceneFn = (ctx, VW, VH, now, res) => {
+  const ranks = Math.min((res.params.ranks as number) ?? 4, 6);
+  const tpr = Math.min((res.params.threadsPerRank as number) ?? 4, 8);
+  const total = ranks * tpr;
+  const pad = 14, gap = 10, nodeTop = 30;
+  const nodeW = (VW - pad * 2 - gap * (ranks - 1)) / ranks;
+  const nodeH = VH - nodeTop - 46;
+
+  ctx.fillStyle = C.muted; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(`${ranks} MPI ranks × ${tpr} threads/rank = ${total} total cores`, VW / 2, 18);
+
+  for (let r = 0; r < ranks; r++) {
+    const nx = pad + r * (nodeW + gap);
+    rr(ctx, nx, nodeTop, nodeW, nodeH, 8); ctx.fillStyle = "#07101c"; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = C.accent2; ctx.stroke();
+    ctx.fillStyle = C.accent2; ctx.font = "600 9px ui-monospace, monospace"; ctx.textAlign = "center";
+    ctx.fillText("rank " + r, nx + nodeW / 2, nodeTop + 11);
+
+    const thH = Math.min(18, (nodeH - 22) / tpr - 3);
+    for (let t = 0; t < tpr; t++) {
+      const ty = nodeTop + 16 + t * (thH + 3);
+      rr(ctx, nx + 4, ty, nodeW - 8, thH, 3); ctx.fillStyle = "#0d1a28"; ctx.fill();
+      ctx.fillStyle = C.accent; ctx.globalAlpha = 0.18 + 0.28 * Math.sin(now / 260 + r * 1.7 + t * 0.9); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.lineWidth = 0.8; ctx.strokeStyle = C.accent; ctx.stroke();
+      ctx.fillStyle = C.accent; ctx.font = "7px ui-monospace, monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText("t" + t, nx + 7, ty + thH / 2); ctx.textBaseline = "alphabetic";
+    }
+  }
+
+  // MPI halo packets between adjacent ranks
+  const mpiY = nodeTop + nodeH / 2;
+  for (let r = 0; r < ranks - 1; r++) {
+    const sx = pad + r * (nodeW + gap) + nodeW, dx = pad + (r + 1) * (nodeW + gap);
+    for (let d = 0; d < 2; d++) {
+      const phase = ((now * 0.00044 + r * 0.33 + d * 0.5) % 1);
+      const px = d === 0 ? sx + (dx - sx) * phase : dx + (sx - dx) * phase;
+      const py = mpiY + (d === 0 ? -1 : 1) * 10 * Math.sin(phase * Math.PI);
+      const pCol = d === 0 ? C.warn : C.bad;
+      ctx.fillStyle = pCol; ctx.shadowColor = pCol; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(px, py, 3, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+    }
+  }
+
+  const botY = nodeTop + nodeH + 16;
+  ctx.fillStyle = C.dim; ctx.font = "10px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("OpenMP threads share memory within rank · MPI messages cross rank boundaries", VW / 2, botY);
+  ctx.fillStyle = C.good; ctx.font = "600 11px system-ui, sans-serif";
+  ctx.fillText(`${total} cores · ${ranks} MPI domains · ${tpr} OMP threads each`, VW / 2, botY + 17);
+};
+
+export const scenes: Record<string, SceneFn> = {
+  falseSharing, synchronization, bandwidth, imbalance, mpiHalo,
+  cuda, cudaCoalesce: coalesce, cudaDivergence: divergence, cudaAtomics: atomics,
+  numaEffects, cacheHierarchy, simdVec, openmpTasks, cudaSharedMem, mpiCollective, hybridMpi,
+};
