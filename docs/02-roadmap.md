@@ -137,11 +137,29 @@ the Slurm bridge for real clusters. These bare-metal/cloud nodes also unlock **t
 **DoD:** an instructor runs a class through a "speed up this code" challenge backed by real
 cluster execution.
 
-**Status (2026-06-17) — gamification layer complete.** The `/play` hub ships four games:
-**⚡ Race** (head-to-head kernel comparison), **🧩 Quiz** (guess-the-bottleneck),
-**🔬 Sandbox** (Amdahl & Gustafson interactive explorer), and **🏅 Badges** (predict-before-
-you-run reward system across Start / Playground / Flagship). Engineering domain modules
-(FEM/FDTD/CFD), classrooms/LMS, K8s autoscaling, and PMU counters remain future work.
+**Status (2026-06-18) — gamification complete + domain labs underway.**
+
+*Gamification:* The `/play` hub ships five games: **⚡ Race** (head-to-head kernel comparison),
+**🧩 Quiz** (guess-the-bottleneck), **🔬 Sandbox** (Amdahl & Gustafson interactive explorer),
+**🎛 Kernel Tuner** (interactive launch-parameter explorer for occupancy + arithmetic intensity),
+and **🏅 Badges** (predict-before-you-run reward system across Start / Playground / Flagship).
+
+*7 new Flagship experiments:* **NUMA Effects**, **Cache Hierarchy**, **SIMD Vectorization**,
+**OpenMP Tasks**, **GPU Shared Memory**, **MPI Collectives**, **Hybrid MPI+OMP** — model-only
+with 2D Canvas scenes in `packages/viz`. Flagship count: 9 → 16.
+
+*CUDA reference:* 24 entries across 8 categories (kernel launch, memory management, shared
+memory, synchronization, warp primitives, concurrency, memory model, performance), 11 essentials.
+CUDA is now the sixth tech filter tab in `/reference`.
+
+*P5 domain labs started:* The `/modules` hub is live with three engineering simulation mini-labs:
+- **🌊 WaveLab** — 1-D FDTD wave solver (256 cells, reflective/absorptive boundaries, animated waveform)
+- **🌌 NBodyLab** — 32-particle N-body gravity (Barnes–Hut model, animated particle field)
+- **🔢 GemmLab** — C=A×B GEMM (8×8 grids, naïve vs cache-tiled, arithmetic intensity readout)
+
+Each lab shows domain-decomp code snippets for serial/OpenMP/MPI/GPU. The hub links to `/lab`
+(Heat Equation) as a fourth domain mini-lab. FEM/CFD/FFT/multigrid modules, classrooms/LMS,
+K8s autoscaling, and PMU counters remain future work.
 
 ---
 

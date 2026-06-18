@@ -1,34 +1,34 @@
-# services/runner — fixed-kernel source (the four flagship experiments)
+# services/runner — fixed-kernel source
 
-`experiments/bench.c` holds the real OpenMP kernels behind the flagship's **Measured** mode:
-false sharing, synchronization, bandwidth saturation, load imbalance. It is a self-contained
-program — `bench <exp> <variant> <maxthreads>` — that runs a 1→N thread sweep and prints the
-measured points as JSON:
+`experiments/` holds the C/CUDA kernels behind the Flagship's Measured mode:
 
-```
-{"exp":..,"variant":..,"points":[{"p":1,"ms":..[,"gbps":..,"gflops":..]}, ...]}
-```
+| File | What it is |
+|---|---|
+| `bench.c` | OpenMP kernels: false sharing, synchronization, bandwidth saturation, load imbalance |
+| `halo.c` | MPI 1-D Jacobi stencil with ring halo exchange |
+| `occupancy.cu` | CUDA kernel swept across threads/block to measure occupancy |
 
-— exactly the `RunnerData` shape the `ProfileResult` seam consumes.
+Each is a self-contained program that runs a sweep and prints results as JSON — the shape the `ProfileResult` seam expects.
 
-## How it runs now
+## How execution works
 
-The original **stdlib HTTP runner (`server.py`) is retired.** Execution moved to the
-cloud-phase backend in **[`services/api`](../api/README.md)** (FastAPI + Redis/Arq): the worker
-spawns sibling Docker containers and serializes them for clean timing. `bench.c` is compiled
-into the **`vhpce-bench`** image at build time (`infra/docker/bench.Dockerfile`, `-O2 -fopenmp
--march=native`); arbitrary Playground code runs in **`vhpce-runner`**
-(`infra/docker/runner.Dockerfile`).
+The old stdlib HTTP runner (`server.py`) is retired. Execution goes through the gateway in [`services/api`](../api/README.md): an Arq worker spawns sibling Docker containers and serializes them for clean timing.
+
+- `bench.c` is compiled into `vhpce-bench` (`infra/docker/bench.Dockerfile`, `-O2 -fopenmp -march=native`)
+- `halo.c` is compiled into `vhpce-mpi` (`infra/docker/mpi.Dockerfile`, OpenMPI)
+- `occupancy.cu` is compiled into `vhpce-cuda` (`infra/docker/cuda.Dockerfile`, nvcc sm_120/PTX fallback)
+- Arbitrary Playground code runs in `vhpce-runner` (`infra/docker/runner.Dockerfile`)
 
 ```bash
-docker compose -f infra/docker/compose.yml --profile build build   # builds vhpce-bench + vhpce-runner
-docker compose -f infra/docker/compose.yml up -d                   # redis + api + worker
+pnpm gateway:build:cpu   # builds bench + runner + mpi images
+pnpm gateway:build:gpu   # builds the CUDA image (large, one-time)
+pnpm gateway:up          # starts redis + api + worker
 ```
 
-## What's real vs modeled
+## What's measured vs modeled
 
-Real: compilation, execution, wall-clock timing, thread scaling on 24 cores, achieved DRAM
-bandwidth (bytes/time) and GFLOP/s for the triad. Not measured locally (WSL2 has no host PMU):
-hardware cache-miss / IPC counters — those arrive on bare-metal/cloud (Phase 5). The Playground
-adds **simulated** cache-miss counters via cachegrind. The offline path is the flagship's
-**Model** mode (pure client-side, no backend, no Docker).
+**Real:** compilation, execution, wall-clock timing, thread/rank scaling, achieved DRAM bandwidth, GFLOP/s, GPU occupancy (via CUDA Occupancy API).
+
+**Simulated:** cache-miss / IPC counters — the Playground uses Valgrind cachegrind for these. True hardware PMU counters (`perf`/LIKWID) require a bare-metal Linux node without WSL2's PMU restrictions.
+
+The Flagship's **Model** mode is the fully offline path: pure client-side physics, no Docker needed.

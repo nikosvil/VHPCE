@@ -1,20 +1,16 @@
 # VHPCE — Setup Guide
 
-This guide gets **Visual HPC for Engineers** running on your machine, from "I just cloned the
-repo" to "I can see it in my browser." It's written for students and instructors with varying
-hardware — **everything below Tier 0 is optional**, and the app tells you what's available.
-
-There are three tiers. Pick the one that matches your machine — you can always add the next tier
-later without redoing anything.
+Three tiers. Pick the one that matches your machine — you can always add the next tier later
+without redoing anything.
 
 | Tier | What you get | Needs |
 |------|---------------|-------|
-| **0 — Quick Start** | The full UI: Flagship (Model mode), `/learn`, `/reference`, `/lab`, the Code Playground UI | Node.js + pnpm only. Any OS, any hardware. |
-| **1 — Measured (CPU)** | Real OpenMP/MPI compiles & runs on *your* CPU cores, behind the Model⇄Measured toggle; the Code Playground actually runs your code | + Docker |
-| **2 — Measured (GPU)** | The CUDA experiments (GPU Occupancy, Coalescing, Divergence, Atomics) run on *your* NVIDIA GPU | + NVIDIA GPU, driver, `nvidia-container-toolkit` |
+| **0 — Quick Start** | Full UI in Model mode — every page, every experiment, fully interactive | Node.js ≥ 20.9 + pnpm. Any OS. |
+| **1 — Measured (CPU)** | Real OpenMP/MPI runs on your cores; the Code Playground actually compiles and runs your code | + Docker |
+| **2 — Measured (GPU)** | CUDA experiments (GPU Occupancy, Coalescing, Divergence, Atomics) run on your NVIDIA GPU | + NVIDIA GPU + `nvidia-container-toolkit` |
 
-If you only do Tier 0, the app is **fully usable** — every experiment has a physically-grounded
-model, deterministic explanations, and interactive 2D/3D visuals with no backend at all.
+Tier 0 is fully functional on its own — every experiment has an offline physics-based model with
+2D/3D visuals and a written diagnosis. Tiers 1 and 2 add real hardware measurements on top.
 
 ---
 
@@ -65,30 +61,21 @@ cd VHPCE
 pnpm install
 ```
 
-This installs dependencies for the whole monorepo (the Next.js app + its shared `@vhpce/*`
-packages — there's no separate build step, packages are consumed as TypeScript source directly).
-
 ### 1.3 Run it
 
 ```bash
 pnpm --filter web dev
 ```
 
-Open **http://localhost:3000**. You should see the Flagship — pick an experiment (e.g. *False
-Sharing*), it should render a chart, a 2D/3D scene, and a written diagnosis, all in **Model**
-mode.
+Open **http://localhost:3000**. Pick any experiment — it should show a chart, 2D/3D animation, and a written diagnosis in Model mode.
 
-**What works at Tier 0:** `/` (Flagship, Model mode), `/learn`, `/reference`, `/lab` — all fully
-interactive, all offline. The **Measured** toggle and the Playground's **Run** button need
-Tier 1 (below); without it they show a banner explaining the gateway isn't running, and
-Measured falls back to Model automatically.
+The **Measured** toggle and Playground **Run** button show a banner until the gateway is running (Tier 1). Everything else works offline.
 
 ---
 
 ## 2. Tier 1 — Measured mode (your CPU, via Docker)
 
-This builds and runs the real OpenMP/MPI kernels in locked-down Docker containers, and powers
-the Code Playground (compile + run arbitrary OpenMP C you write).
+This builds and runs real OpenMP/MPI kernels in locked-down Docker containers, and powers the Code Playground.
 
 ### 2.1 Install Docker
 
@@ -131,16 +118,11 @@ Pick your OS:
 
 ### 2.2 Build the CPU sandbox images
 
-From the repo root (this builds the OpenMP bench kernels, the untrusted-code runner, and the MPI
-image — **not** CUDA, which is large and GPU-only):
-
 ```bash
 pnpm gateway:build:cpu
 ```
 
-This is equivalent to
-`docker compose -f infra/docker/compose.yml --profile build build bench runner mpi`. It pulls a
-gcc/Ubuntu base image and compiles the kernels — a couple of minutes the first time.
+This builds the OpenMP bench kernels, the code runner, and the MPI image (not CUDA — that's Tier 2). First run takes a couple of minutes to pull the base image.
 
 ### 2.3 Start the gateway
 
@@ -158,15 +140,9 @@ curl http://localhost:8000/api/health
 
 ### 2.4 Use it
 
-With `pnpm --filter web dev` still running (Tier 0), reload **http://localhost:3000**. The
-"gateway offline" banner should disappear. On the Flagship, switch **Model → Measured** — you're
-now seeing real wall-clock timings from containers running on *your* CPU. On `/playground`, the
-**Run** button now compiles and executes your code.
+With the dev server still running, reload **http://localhost:3000**. The "gateway offline" banner disappears. Switch any experiment to **Measured** — you're now seeing real timings from your CPU. On `/playground`, the **Run** button compiles and executes your code.
 
-> **Note on core counts:** the measured sweep always tries thread/rank counts up to 24 (or 64 in
-> the Playground), regardless of how many cores you have. If your machine has fewer cores, the
-> curve will flatten or even dip past your core count — that's real **oversubscription**, not a
-> bug, and it's its own useful lesson about scheduling overhead.
+> **Core count note:** the measured sweep tries thread/rank counts up to 24 regardless of how many cores you have. If your machine has fewer, the curve will flatten or dip past your core count — that's real oversubscription, not a bug.
 
 ### 2.5 Stopping / updating
 
@@ -180,46 +156,37 @@ pnpm gateway:build:cpu           # rebuild after editing infra/docker/* or servi
 
 ## 3. Tier 2 — GPU experiments (optional, NVIDIA only)
 
-The CUDA experiments (GPU Occupancy, Memory Coalescing, Warp Divergence, Atomic Contention) need
-an **NVIDIA GPU** with Docker GPU passthrough. This works on **Linux** and **Windows+WSL2**, not
-on macOS (no NVIDIA GPUs) or AMD/Intel GPUs.
+Requires an **NVIDIA GPU** with Docker GPU passthrough. Works on Linux and Windows+WSL2. Not supported on macOS or AMD/Intel GPUs.
 
-1. Install/update your **NVIDIA driver** (Windows users: the regular GeForce/Studio driver
-   already includes WSL2 GPU support — no separate driver needed inside WSL).
-2. Install the **NVIDIA Container Toolkit**:
-   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
-3. Smoke-test GPU passthrough:
+1. Make sure your **NVIDIA driver** is up to date. On Windows, the standard GeForce/Studio driver already includes WSL2 GPU support.
+2. Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+3. Verify GPU passthrough works:
    ```bash
    docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi
    ```
-   You should see your GPU listed. If this fails, fix it before continuing — the steps below
-   will fail the same way.
-4. Build the CUDA image (large — pulls a multi-GB CUDA devel image the first time):
+   Your GPU should appear in the output. If this fails, fix it before continuing.
+4. Build the CUDA image (large — one-time download of several GB):
    ```bash
    pnpm gateway:build:gpu
    ```
-5. Reload the app — the GPU experiments under the Flagship's CUDA tabs now run on your GPU in
-   Measured mode.
+5. Reload the app — the GPU experiments now run on your GPU in Measured mode.
 
-**Don't have a compatible GPU?** Nothing breaks. The CUDA experiments stay in Model mode (which
-already shows the lesson — e.g. register-pressure-limited occupancy) — switching to Measured
-without a GPU shows a clear error and reverts to Model automatically.
+**No compatible GPU?** Nothing breaks. CUDA experiments stay in Model mode and revert automatically if you try Measured without a GPU.
 
 ---
 
 ## 4. Environment variables (optional)
 
-Copy `apps/web/.env.example` to `apps/web/.env.local` and edit as needed, then restart
-`pnpm --filter web dev`:
-
 ```bash
 cp apps/web/.env.example apps/web/.env.local
 ```
 
+Edit the file, then restart the dev server.
+
 | Variable | Default | Purpose |
 |---|---|---|
-| `NEXT_PUBLIC_VHPCE_API` | `http://localhost:8000` | Where the web app looks for the gateway. Only change this if the gateway runs elsewhere (see "For instructors" below). |
-| `ANTHROPIC_API_KEY` | _(unset)_ | Enables the server-side **"Ask the AI"** panel for everyone. Without it, each user can paste their own key in the UI (kept per-tab, never sent to the server). Get a key at https://console.anthropic.com/. |
+| `NEXT_PUBLIC_VHPCE_API` | `http://localhost:8000` | Where the web app looks for the gateway. Change this if your gateway runs on a different host (e.g. a shared classroom server). |
+| `ANTHROPIC_API_KEY` | _(unset)_ | Enables the **"Ask the AI"** panel for all users. Without a server-side key, each user can paste their own key in the panel — it stays in the browser tab and is never sent to the server. |
 
 ---
 
@@ -229,7 +196,7 @@ cp apps/web/.env.example apps/web/.env.local
 |---|---|
 | `http://localhost:3000/` | Flagship loads, an experiment renders a chart + 2D/3D scene + diagnosis |
 | `http://localhost:3000/learn` | Six animated concept cards (OpenMP/MPI basics) |
-| `http://localhost:3000/reference` | Searchable directive library (~150+ entries) |
+| `http://localhost:3000/reference` | Searchable directive library (~214 entries) |
 | `http://localhost:3000/lab` | 2D heat-equation simulation animates |
 | `http://localhost:3000/playground` | Monaco editor loads with a worked example |
 | `http://localhost:8000/api/health` *(Tier 1)* | `{"ok":true,...}` |
@@ -240,48 +207,26 @@ cp apps/web/.env.example apps/web/.env.local
 
 ## 6. For instructors: a shared classroom gateway
 
-Students don't need Docker (or even a powerful machine) if you run **one shared gateway** for the
-class:
+Students only need Node.js — no Docker, no GPU — if you run one shared gateway for the class.
 
-1. On a server (with or without a GPU), follow Tier 1 (and Tier 2 if it has an NVIDIA GPU) to get
-   `infra/docker/compose.yml` running, exposing port `8000`.
-2. On student machines (or in one shared deployment of `apps/web`), set:
-   ```
-   NEXT_PUBLIC_VHPCE_API=https://your-server:8000
-   ```
-   in `apps/web/.env.local`, then `pnpm --filter web dev` (or deploy the Next app and set the env
-   var at deploy time).
-3. Students get full Measured mode and a working Playground without installing Docker.
+1. On a server, follow Tier 1 (and optionally Tier 2) to start `infra/docker/compose.yml` on port `8000`.
+2. On student machines, set `NEXT_PUBLIC_VHPCE_API=https://your-server:8000` in `apps/web/.env.local`, then run the dev server as normal.
+3. Students get Measured mode and a working Playground without installing Docker.
 
-**Security note:** the runner sandboxes are locked down (`--network none`, `--cap-drop ALL`,
-read-only filesystem, memory/PID/time limits — see `infra/docker/runner.Dockerfile` and
-`services/api/README.md`), but a shared gateway is still an **untrusted-code-execution service**.
-Put it behind authentication and/or a private network (campus VPN, etc.) for a real class — don't
-expose `:8000` to the open internet unauthenticated.
+**Security:** the code runner is sandboxed (`--network none`, `--cap-drop ALL`, read-only filesystem, memory/PID/time limits), but you're still running untrusted student code. Put the gateway behind a private network or VPN — don't expose port `8000` to the public internet without authentication.
 
 ---
 
 ## 7. Troubleshooting
 
-- **`node`/`pnpm` not found after install** — close and reopen your terminal so `PATH` picks up
-  the new install (Windows especially).
-- **`pnpm install` fails with a permissions/registry error** — check your network/VPN/proxy; pnpm
-  needs to reach `registry.npmjs.org`.
-- **Docker commands need `sudo` / "permission denied" on Linux** — you weren't added to the
-  `docker` group, or didn't log out/in after being added (§2.1).
-- **`docker run --gpus all` fails ("could not select device driver")** — the NVIDIA Container
-  Toolkit isn't installed/configured (§3 step 2-3); GPU experiments will simply stay in Model
-  mode until this is fixed.
-- **Port `3000` or `8000` already in use** — stop whatever else is using it, or run Next on
-  another port: `pnpm --filter web exec next dev -p 3001` (and update
-  `NEXT_PUBLIC_VHPCE_API`/your bookmark accordingly).
-- **First CUDA build is slow / looks stuck** — the CUDA devel base image is ~5-7 GB; it's a
-  one-time download.
-- **`pnpm --filter web exec tsc --noEmit` complains about `.next/dev/types`** — delete that
-  generated folder first (`rm -rf apps/web/.next/dev/types`); it can get out of sync if `tsc` runs
-  while the dev server is also writing to it.
-- **`/api/health` returns `"docker": false`** — Docker Desktop may still be starting up; wait a
-  few seconds and retry. The Playground's Run button isn't hard-gated on this check.
+- **`node`/`pnpm` not found after install** — close and reopen your terminal so PATH picks up the new install.
+- **`pnpm install` fails with a registry error** — check your network or VPN; pnpm needs to reach `registry.npmjs.org`.
+- **Docker commands need `sudo` on Linux** — you weren't added to the `docker` group, or didn't log out and back in after being added (see §2.1).
+- **`docker run --gpus all` fails ("could not select device driver")** — the NVIDIA Container Toolkit isn't installed or configured correctly (§3, steps 2–3).
+- **Port 3000 or 8000 already in use** — stop the conflicting process, or start the dev server on a different port: `pnpm --filter web exec next dev -p 3001`.
+- **First CUDA build is slow** — the CUDA base image is 5–7 GB; it's a one-time download.
+- **`tsc --noEmit` complains about `.next/dev/types`** — delete the generated folder: `rm -rf apps/web/.next/dev/types`.
+- **`/api/health` returns `"docker": false`** — Docker Desktop may still be starting; wait a few seconds and retry.
 
 ---
 
