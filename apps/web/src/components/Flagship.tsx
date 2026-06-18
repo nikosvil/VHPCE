@@ -173,7 +173,6 @@ export default function Flagship() {
   const isSimd = exp === "simdVec";
   const isCudaSharedMem = exp === "cudaSharedMem";
   const cudaFam = isCuda || isCoalesce || isDiverge || isAtomics || isCudaSharedMem;
-  const sweepFam = isCoalesce || isDiverge || isAtomics || isSimd || isCudaSharedMem;
   const ranksFam = exp === "mpiHalo" || exp === "mpiCollective" || exp === "hybridMpi";
   const xKey = ranksFam ? "ranks" : "threads";
   const xLabel = ranksFam ? "Ranks" : "Threads";

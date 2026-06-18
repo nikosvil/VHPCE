@@ -25,8 +25,6 @@ function computeThroughput(blockSize: number, regsPerThread: number, stride: num
 
   const coalesceFactor = stride === 1 ? 1.0 : stride === 2 ? 0.65 : stride <= 4 ? 0.4 : 0.2;
   const simdFactor = vec === 4 ? 1.0 : vec === 2 ? 0.75 : 0.5;
-  const tiling = 1.0; // tiling handled separately below
-
   return PEAK_GFLOPS * occupancy * coalesceFactor * simdFactor * Math.min(1, occupancy + 0.2);
 }
 

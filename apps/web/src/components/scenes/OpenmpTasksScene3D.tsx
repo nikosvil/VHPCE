@@ -20,7 +20,7 @@ function TaskNode({ pos, size, depth }: { pos: [number, number, number]; size: n
   );
 }
 
-function WorkerSphere({ workerIdx, numWorkers, taskPositions, coarse }: { workerIdx: number; numWorkers: number; taskPositions: [number, number, number][]; coarse: boolean }) {
+function WorkerSphere({ workerIdx, numWorkers: _numWorkers, taskPositions, coarse }: { workerIdx: number; numWorkers: number; taskPositions: [number, number, number][]; coarse: boolean }) {
   const ref = useRef<THREE.Mesh>(null);
   const speed = coarse ? 0.4 : 1.8;
   useFrame(({ clock }) => {

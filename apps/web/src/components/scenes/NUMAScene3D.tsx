@@ -31,7 +31,7 @@ function Packet({ from, to, phase, col }: { from: [number, number, number]; to: 
   );
 }
 
-function Socket({ x, cores, label, col }: { x: number; cores: number; label: string; col: string }) {
+function Socket({ x, cores, label: _label, col }: { x: number; cores: number; label: string; col: string }) {
   const xs = Array.from({ length: Math.min(cores, 6) }, (_, i) => x - 0.75 + i * 0.3);
   const ys = [0.3, -0.05];
   return (
@@ -53,7 +53,6 @@ function Socket({ x, cores, label, col }: { x: number; cores: number; label: str
 
 function NUMAContent({ threads, numaAware }: { threads: number; numaAware: boolean }) {
   const remoteThreads = numaAware ? 0 : Math.max(0, threads - NODE_SIZE);
-  const colPacket = remoteThreads > 0 ? RED : GREEN;
   const label0 = "Socket 0";
   const label1 = "Socket 1";
 

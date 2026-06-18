@@ -10,7 +10,6 @@ import { Scene3DShell } from "./Shell";
 const GREEN = "#3ddc97";
 const AMBER = "#ffb454";
 const RED   = "#ff5d73";
-const CYAN  = "#4cc9f0";
 
 function collectiveColor(c: string) {
   if (c === "broadcast" || c === "reduce") return GREEN;

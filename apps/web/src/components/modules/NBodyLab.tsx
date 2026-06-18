@@ -139,7 +139,7 @@ export default function NBodyLab() {
   };
 
   // Initialize on mount and when n/kind changes
-  useEffect(() => { reset(n, kind, eps); }, [n, kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { reset(n, kind, eps); }, [n, kind]); // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
 
   useEffect(() => {
     const cv = canvasRef.current; if (!cv) return;
