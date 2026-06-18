@@ -21,7 +21,7 @@ function SimdContent({ width, isSoA }: { width: number; isSoA: boolean }) {
       const m = meshes.current[i];
       if (!m) continue;
       const active = i < width;
-      if (!active) { m.scale.setScalar(1); return; }
+      if (!active) { m.scale.setScalar(1); continue; }
       if (isSoA) {
         // All lanes pulse together
         const pulse = 0.85 + 0.15 * Math.sin(t * 2.5);

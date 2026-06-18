@@ -163,7 +163,8 @@ export default function Flagship() {
 
   const p = params[exp];
   const measured = mode === "measured";
-  const use3D = view === "3d";
+  const has2D = exp in scenes;          // new experiments have no 2D canvas scene
+  const use3D = !has2D || view === "3d"; // force 3D when no 2D scene exists
   const Scene3D = SCENES_3D[exp];
   const isCuda = exp === "cuda";
   const isCoalesce = exp === "cudaCoalesce";
@@ -360,7 +361,7 @@ export default function Flagship() {
 
       <nav className="tabs">
         {EXPERIMENTS.map((e, i) => (
-          <button key={e.id} className={"tab" + (e.id === exp ? " active" : "")} onClick={() => { setExp(e.id as ExpId); if (MODEL_ONLY.has(e.id as ExpId)) setMode("model"); }}>
+          <button key={e.id} className={"tab" + (e.id === exp ? " active" : "")} onClick={() => { setExp(e.id as ExpId); if (MODEL_ONLY.has(e.id as ExpId)) setMode("model"); if (!(e.id in scenes)) setView("3d"); }}>
             <span className="ix">{String(i + 1).padStart(2, "0")}</span>{e.name}
           </button>
         ))}
@@ -620,8 +621,8 @@ export default function Flagship() {
             <span>Visualization</span>
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span className="view-toggle">
-                <button className={view === "2d" ? "on" : ""} onClick={() => setView("2d")}>2D</button>
-                <button className={view === "3d" ? "on" : ""} onClick={() => setView("3d")}>3D</button>
+                <button className={!use3D ? "on" : ""} disabled={!has2D} onClick={() => setView("2d")} title={!has2D ? "2D view not available for this experiment" : undefined}>2D</button>
+                <button className={use3D ? "on" : ""} onClick={() => setView("3d")}>3D</button>
               </span>
               <span className="scene-tag">{expMeta.scene}</span>
             </span>
