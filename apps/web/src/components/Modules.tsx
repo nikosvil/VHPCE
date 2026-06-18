@@ -4,10 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import WaveLab from "./modules/WaveLab";
 import NBodyLab from "./modules/NBodyLab";
+import GemmLab from "./modules/GemmLab";
 
 const TABS = [
   { id: "wave",  label: "🌊 Wave (FDTD)" },
   { id: "nbody", label: "🌌 N-Body Gravity" },
+  { id: "gemm",  label: "🔢 Matrix Multiply" },
 ];
 
 export default function Modules() {
@@ -30,6 +32,7 @@ export default function Modules() {
 
       {tab === "wave"  && <WaveLab />}
       {tab === "nbody" && <NBodyLab />}
+      {tab === "gemm"  && <GemmLab />}
     </main>
   );
 }
