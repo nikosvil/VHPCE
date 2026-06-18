@@ -3,7 +3,7 @@
 // runnable Playground example. OpenACC entries are a planned follow-up (the Tech type allows it).
 import type { ArchetypeParams } from "./archetypes";
 
-export type Tech = "OpenMP" | "MPI" | "OpenACC";
+export type Tech = "OpenMP" | "MPI" | "OpenACC" | "Slurm" | "pthreads";
 
 export type RefEntry = {
   id: string;
@@ -1298,9 +1298,205 @@ export const ENTRIES: RefEntry[] = [
     note: "Set ACC_DEVICE_TYPE=host to run the very same binary on the CPU for debugging and correctness checks.",
     visual: { archetype: "offload", params: { kind: "parallel" } }, related: ["acc_devices", "acc_init"],
   },
+
+  /* ===================== Slurm ===================== */
+  {
+    id: "slurm_sbatch", tech: "Slurm", category: "Job submission", name: "sbatch",
+    signature: "sbatch [options] script.sh\n# common options:\n#SBATCH --nodes=4\n#SBATCH --ntasks-per-node=24\n#SBATCH --time=01:00:00\n#SBATCH --partition=gpu",
+    summary: "Submit a batch job script to the Slurm scheduler — runs when resources become available.",
+    note: "Embed resource requests as #SBATCH directives inside the script rather than on the command line — that way the script is self-documenting and reproducible.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } },
+    related: ["slurm_squeue", "slurm_scancel", "slurm_srun"],
+  },
+  {
+    id: "slurm_srun", tech: "Slurm", category: "Job submission", name: "srun",
+    signature: "srun --nodes=4 --ntasks=96 ./a.out\n# inside a batch script:\nsrun ./a.out",
+    summary: "Launch a parallel job step — can be used inside sbatch scripts or interactively to allocate and run.",
+    note: "Inside a batch script srun inherits the #SBATCH allocation; on the login node it requests new resources. For MPI, srun replaces mpirun.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } },
+    related: ["slurm_sbatch", "slurm_salloc"],
+  },
+  {
+    id: "slurm_salloc", tech: "Slurm", category: "Job submission", name: "salloc",
+    signature: "salloc --nodes=2 --ntasks-per-node=24 --time=00:30:00\n# then: srun ./a.out",
+    summary: "Request an interactive allocation — gives you a shell on the compute nodes for debugging.",
+    note: "Don't do heavy work on the login node — use salloc to get a compute-node shell, then srun your executable.",
+    visual: { archetype: "ranksMemory", params: { threads: 2 } },
+    related: ["slurm_srun", "slurm_sbatch"],
+  },
+  {
+    id: "slurm_squeue", tech: "Slurm", category: "Monitoring", name: "squeue",
+    signature: "squeue -u $USER           # your jobs\nsqueue -p gpu             # all jobs on a partition\nsqueue --job 12345        # one job",
+    summary: "List pending and running jobs in the queue with state, nodes, and estimated start time.",
+    note: "Job state: PD = pending (waiting for resources), R = running, CG = completing. Use -l for long format.",
+    visual: { archetype: "ranksMemory", params: { threads: 3 } },
+    related: ["slurm_sbatch", "slurm_scancel"],
+  },
+  {
+    id: "slurm_scancel", tech: "Slurm", category: "Monitoring", name: "scancel",
+    signature: "scancel 12345            # cancel one job\nscancel -u $USER         # cancel all your jobs\nscancel --name myjob",
+    summary: "Cancel a pending or running job — sends SIGTERM then SIGKILL after a grace period.",
+    note: "Use scancel --signal=USR1 <jobid> to send a custom signal (e.g. checkpoint a job before cancelling).",
+    visual: { archetype: "ranksMemory", params: { threads: 2 } },
+    related: ["slurm_squeue"],
+  },
+  {
+    id: "slurm_sacct", tech: "Slurm", category: "Monitoring", name: "sacct",
+    signature: "sacct -j 12345 --format=JobID,State,Elapsed,MaxRSS,CPUTime\nsacct -u $USER --starttime=today",
+    summary: "Query the job accounting database — shows completed jobs, CPU-hours, and peak memory.",
+    note: "MaxRSS shows peak resident set size per step — useful for checking if your job is close to the memory limit.",
+    visual: { archetype: "ranksMemory", params: { threads: 2 } },
+    related: ["slurm_squeue", "slurm_seff"],
+  },
+  {
+    id: "slurm_seff", tech: "Slurm", category: "Monitoring", name: "seff",
+    signature: "seff 12345",
+    summary: "Print a short CPU and memory efficiency summary for a completed job — how much of the allocation you actually used.",
+    note: "A CPU efficiency of 50% means half your cores were idle. A memory efficiency of 20% means you over-requested — request less next time to get higher queue priority.",
+    visual: { archetype: "ranksMemory", params: { threads: 2 } },
+    related: ["slurm_sacct"],
+  },
+  {
+    id: "slurm_nodes", tech: "Slurm", category: "Resource directives", name: "--nodes / --ntasks / --cpus-per-task",
+    signature: "#SBATCH --nodes=4\n#SBATCH --ntasks-per-node=1     # MPI ranks per node\n#SBATCH --cpus-per-task=24      # OMP threads per rank",
+    summary: "The three axes of Slurm allocation: nodes, MPI tasks (ranks), and CPU threads per task.",
+    note: "For hybrid MPI+OpenMP: set ntasks-per-node=1 (one rank/node) and cpus-per-task=24, then export OMP_NUM_THREADS=24 in your script.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } },
+    related: ["slurm_sbatch", "slurm_srun"],
+  },
+  {
+    id: "slurm_gpu", tech: "Slurm", category: "Resource directives", name: "--gres=gpu",
+    signature: "#SBATCH --partition=gpu\n#SBATCH --gres=gpu:1            # request 1 GPU\n#SBATCH --gres=gpu:a100:2       # request 2 A100s",
+    summary: "Request one or more GPUs as a Generic RESource (GRES) — makes CUDA_VISIBLE_DEVICES available automatically.",
+    note: "Always check sinfo -p <partition> -o '%G' to see available GPU types before submitting.",
+    visual: { archetype: "offload", params: { kind: "parallel" } },
+    related: ["slurm_sbatch", "slurm_nodes"],
+  },
+  {
+    id: "slurm_array", tech: "Slurm", category: "Advanced", name: "--array",
+    signature: "#SBATCH --array=1-100\n#SBATCH --array=1-100%8   # at most 8 concurrent\n# inside script:\necho \"Task $SLURM_ARRAY_TASK_ID\"",
+    summary: "Submit many independent jobs as one array — each gets a unique SLURM_ARRAY_TASK_ID to select its input.",
+    note: "Use %N to cap concurrency so you don't saturate the cluster. Ideal for parameter sweeps — one sbatch, zero shell loops.",
+    visual: { archetype: "worksharing", params: { threads: 8 } },
+    related: ["slurm_sbatch", "slurm_squeue"],
+  },
+  {
+    id: "slurm_env", tech: "Slurm", category: "Advanced", name: "Slurm environment variables",
+    signature: "SLURM_JOB_ID         # current job id\nSLURM_JOB_NODELIST   # e.g. node[01-04]\nSLURM_NTASKS         # total MPI ranks\nSLURM_ARRAY_TASK_ID  # array index",
+    summary: "Environment variables automatically set by Slurm inside every job — use them to build portable scripts.",
+    note: "Use $SLURM_NTASKS instead of hardcoding the rank count so the same script scales when you change --ntasks.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } },
+    related: ["slurm_array", "slurm_sbatch"],
+  },
+
+  /* ===================== pthreads ===================== */
+  {
+    id: "pt_create", tech: "pthreads", category: "Thread lifecycle", name: "pthread_create",
+    signature: "pthread_t tid;\npthread_create(&tid, NULL, thread_fn, arg);",
+    summary: "Spawn a new POSIX thread that starts executing thread_fn(arg) — the lowest-level thread primitive on Linux.",
+    note: "Always pthread_join or pthread_detach every thread you create — unjoined threads leak resources.",
+    visual: { archetype: "forkJoin", params: { threads: 4 } },
+    related: ["pt_join", "pt_detach"],
+  },
+  {
+    id: "pt_join", tech: "pthreads", category: "Thread lifecycle", name: "pthread_join",
+    signature: "void *retval;\npthread_join(tid, &retval);   // blocks until thread exits",
+    summary: "Wait for a thread to finish and reclaim its resources — the pthread equivalent of a barrier for one thread.",
+    note: "A thread is joinable by default. You must call either pthread_join or pthread_detach exactly once per thread.",
+    visual: { archetype: "barrier", params: { threads: 4 } },
+    related: ["pt_create", "pt_detach"],
+  },
+  {
+    id: "pt_detach", tech: "pthreads", category: "Thread lifecycle", name: "pthread_detach",
+    signature: "pthread_detach(tid);   // or at creation:\npthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);",
+    summary: "Mark a thread as detached — it cleans up automatically on exit with no need for pthread_join.",
+    note: "Use for fire-and-forget threads (e.g. background loggers). You can no longer join a detached thread.",
+    visual: { archetype: "forkJoin", params: { threads: 4 } },
+    related: ["pt_create", "pt_join"],
+  },
+  {
+    id: "pt_mutex", tech: "pthreads", category: "Synchronization", name: "pthread_mutex_t",
+    signature: "pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;\npthread_mutex_lock(&mtx);\n  /* critical section */\npthread_mutex_unlock(&mtx);",
+    summary: "A mutual-exclusion lock — only one thread enters the critical section at a time.",
+    note: "Prefer PTHREAD_MUTEX_INITIALIZER for static mutexes. For dynamic ones, call pthread_mutex_init and pthread_mutex_destroy.",
+    visual: { archetype: "criticalAtomic", params: { kind: "critical" } },
+    related: ["pt_trylock", "pt_rwlock", "pt_cond"],
+  },
+  {
+    id: "pt_trylock", tech: "pthreads", category: "Synchronization", name: "pthread_mutex_trylock",
+    signature: "if (pthread_mutex_trylock(&mtx) == 0) {\n  /* got the lock */\n  pthread_mutex_unlock(&mtx);\n} else { /* lock busy */ }",
+    summary: "Non-blocking mutex acquire — returns immediately with EBUSY if the lock is held.",
+    note: "Useful for work-stealing or back-off loops, but beware livelock if both threads always find the lock busy.",
+    visual: { archetype: "criticalAtomic", params: { kind: "critical" } },
+    related: ["pt_mutex"],
+  },
+  {
+    id: "pt_rwlock", tech: "pthreads", category: "Synchronization", name: "pthread_rwlock_t",
+    signature: "pthread_rwlock_t rwl = PTHREAD_RWLOCK_INITIALIZER;\npthread_rwlock_rdlock(&rwl);   // many readers OK\npthread_rwlock_wrlock(&rwl);   // exclusive write\npthread_rwlock_unlock(&rwl);",
+    summary: "A reader-writer lock — allows many concurrent readers but only one writer at a time.",
+    note: "Use when reads far outnumber writes. Writer starvation is possible on some implementations — check PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP if needed.",
+    visual: { archetype: "reduction", params: { threads: 6 } },
+    related: ["pt_mutex"],
+  },
+  {
+    id: "pt_cond", tech: "pthreads", category: "Synchronization", name: "pthread_cond_t",
+    signature: "pthread_cond_t cv = PTHREAD_COND_INITIALIZER;\n// waiter:\npthread_mutex_lock(&mtx);\nwhile (!ready) pthread_cond_wait(&cv, &mtx);\npthread_mutex_unlock(&mtx);\n// signaller:\npthread_mutex_lock(&mtx); ready = 1;\npthread_cond_signal(&cv);\npthread_mutex_unlock(&mtx);",
+    summary: "Condition variable — lets one thread sleep until another signals that a condition has become true.",
+    note: "Always check the predicate in a while loop, not if — spurious wakeups are possible on Linux.",
+    visual: { archetype: "barrier", params: { threads: 4 } },
+    related: ["pt_mutex", "pt_barrier"],
+  },
+  {
+    id: "pt_barrier", tech: "pthreads", category: "Synchronization", name: "pthread_barrier_t",
+    signature: "pthread_barrier_t bar;\npthread_barrier_init(&bar, NULL, NUM_THREADS);\n// in each thread:\npthread_barrier_wait(&bar);   // all block until N arrive",
+    summary: "A reusable barrier — all threads block at pthread_barrier_wait until the configured count have arrived.",
+    note: "One thread receives PTHREAD_BARRIER_SERIAL_THREAD as the return value — you can use that to run a post-barrier reduction in exactly one thread.",
+    visual: { archetype: "barrier", params: { threads: 6 } },
+    related: ["pt_cond", "pt_mutex"],
+  },
+  {
+    id: "pt_sem", tech: "pthreads", category: "Synchronization", name: "sem_t (POSIX semaphore)",
+    signature: "#include <semaphore.h>\nsem_t sem;\nsem_init(&sem, 0, initial_count);\nsem_wait(&sem);   // decrement (block if 0)\nsem_post(&sem);   // increment (wake a waiter)",
+    summary: "A counting semaphore — generalizes a mutex; allows up to N concurrent holders.",
+    note: "sem_wait is equivalent to P() and sem_post to V() in classic CS notation. For named semaphores (IPC), use sem_open.",
+    visual: { archetype: "criticalAtomic", params: { kind: "atomic" } },
+    related: ["pt_mutex", "pt_cond"],
+  },
+  {
+    id: "pt_attr", tech: "pthreads", category: "Thread lifecycle", name: "pthread_attr_t",
+    signature: "pthread_attr_t attr;\npthread_attr_init(&attr);\npthread_attr_setstacksize(&attr, 4 * 1024 * 1024);  // 4 MB\npthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);\npthread_create(&tid, &attr, fn, arg);\npthread_attr_destroy(&attr);",
+    summary: "Thread attribute object — controls stack size, detach state, scheduling policy, and CPU affinity at creation time.",
+    note: "Stack overflow crashes silently on many platforms. If your threads use large local arrays, increase the stack size via setstacksize.",
+    visual: { archetype: "forkJoin", params: { threads: 4 } },
+    related: ["pt_create", "pt_affinity"],
+  },
+  {
+    id: "pt_affinity", tech: "pthreads", category: "Advanced", name: "pthread_setaffinity_np",
+    signature: "cpu_set_t cpus;\nCPU_ZERO(&cpus); CPU_SET(core_id, &cpus);\npthread_setaffinity_np(tid, sizeof(cpus), &cpus);",
+    summary: "Pin a thread to specific CPU cores — reduces cache migration and NUMA remote accesses.",
+    note: "The _np suffix means non-portable (Linux/glibc only). On macOS use thread_policy_set. Combine with numactl for socket-level placement.",
+    visual: { archetype: "dataSharing", params: {} },
+    related: ["pt_attr", "pt_create"],
+  },
+  {
+    id: "pt_once", tech: "pthreads", category: "Advanced", name: "pthread_once",
+    signature: "pthread_once_t flag = PTHREAD_ONCE_INIT;\nvoid init() { /* runs exactly once */ }\npthread_once(&flag, init);  // safe from any thread",
+    summary: "Guarantee a function runs exactly once regardless of how many threads call it — thread-safe singleton initialization.",
+    note: "Equivalent to C++11 static local initialization. Prefer this over a double-checked lock pattern, which is error-prone without the right memory-model barriers.",
+    visual: { archetype: "criticalAtomic", params: { kind: "critical" } },
+    related: ["pt_mutex"],
+  },
+  {
+    id: "pt_tls", tech: "pthreads", category: "Advanced", name: "pthread_key_t (TLS)",
+    signature: "pthread_key_t key;\npthread_key_create(&key, destructor);\npthread_setspecific(key, ptr);   // per-thread store\nvoid *p = pthread_getspecific(key);",
+    summary: "Thread-local storage — each thread gets its own independent copy of the value associated with a key.",
+    note: "Prefer __thread or thread_local (C11/C++11) for static TLS, which the compiler optimises better. Use pthread_key only for dynamic TLS or when you need the per-thread destructor.",
+    visual: { archetype: "dataSharing", params: {} },
+    related: ["pt_create"],
+  },
 ];
 
-export const TECHS: Tech[] = ["OpenMP", "MPI", "OpenACC"];
+export const TECHS: Tech[] = ["OpenMP", "MPI", "OpenACC", "Slurm", "pthreads"];
 export const categoriesFor = (tech: Tech) =>
   Array.from(new Set(ENTRIES.filter((e) => e.tech === tech).map((e) => e.category)));
 
@@ -1315,4 +1511,8 @@ export const ESSENTIAL = new Set<string>([
   "mpi_scatter", "mpi_gather", "mpi_reduce", "mpi_allreduce", "mpi_barrier",
   // OpenACC
   "acc_parallel_loop", "acc_kernels", "acc_data", "acc_copyin",
+  // Slurm
+  "slurm_sbatch", "slurm_srun", "slurm_squeue", "slurm_scancel", "slurm_nodes", "slurm_gpu",
+  // pthreads
+  "pt_create", "pt_join", "pt_mutex", "pt_cond", "pt_barrier",
 ]);
