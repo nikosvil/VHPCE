@@ -3,7 +3,7 @@
 // runnable Playground example. OpenACC entries are a planned follow-up (the Tech type allows it).
 import type { ArchetypeParams } from "./archetypes";
 
-export type Tech = "OpenMP" | "MPI" | "OpenACC" | "Slurm" | "pthreads";
+export type Tech = "OpenMP" | "MPI" | "OpenACC" | "Slurm" | "pthreads" | "CUDA";
 
 export type RefEntry = {
   id: string;
@@ -1494,9 +1494,219 @@ export const ENTRIES: RefEntry[] = [
     visual: { archetype: "dataSharing", params: {} },
     related: ["pt_create"],
   },
+
+  /* ===================== CUDA ===================== */
+  {
+    id: "cuda_kernel", tech: "CUDA", category: "Kernel launch", name: "__global__ + <<<grid, block>>>",
+    signature: "__global__ void kernel(float *d_a, int N) {\n  int i = blockIdx.x * blockDim.x + threadIdx.x;\n  if (i < N) d_a[i] *= 2.0f;\n}\n// host launch:\nkernel<<<(N+255)/256, 256>>>(d_a, N);",
+    summary: "__global__ marks a function to run on the GPU; <<<grid, block>>> specifies how many thread blocks and threads per block to launch.",
+    note: "Total threads = gridDim.x × blockDim.x. Always guard with if (i < N) when N isn't a multiple of blockDim.x. The launch is asynchronous — the host continues immediately.",
+    visual: { archetype: "offload", params: { kind: "parallel" } },
+    related: ["cuda_thread_idx", "cuda_dim3", "cuda_device_sync", "cuda_device_fn"],
+  },
+  {
+    id: "cuda_thread_idx", tech: "CUDA", category: "Kernel launch", name: "threadIdx / blockIdx / blockDim / gridDim",
+    signature: "// 1-D:\nint i = blockIdx.x * blockDim.x + threadIdx.x;\n// 2-D (e.g. matrix):\nint row = blockIdx.y * blockDim.y + threadIdx.y;\nint col = blockIdx.x * blockDim.x + threadIdx.x;",
+    summary: "Built-in variables that give each thread its unique position — the GPU equivalent of omp_get_thread_num().",
+    note: "threadIdx is 0-based within a block, blockIdx within the grid. For 2-D problems build row and col from the .y and .x components respectively.",
+    visual: { archetype: "gangs", params: { level: "gang" } },
+    related: ["cuda_kernel", "cuda_dim3"],
+  },
+  {
+    id: "cuda_dim3", tech: "CUDA", category: "Kernel launch", name: "dim3 (grid / block dimensions)",
+    signature: "dim3 block(16, 16);               // 16×16 = 256 threads/block\ndim3 grid((W+15)/16, (H+15)/16); // enough blocks to cover W×H\nkernel<<<grid, block>>>(d_a, W, H);",
+    summary: "A 3-component integer vector for specifying grid and block dimensions — use for 2-D/3-D problems such as images, volumes, and matrices.",
+    note: "Max blockDim is 1024 total threads (product of x·y·z). Max gridDim.x is ~2 billion; y and z are capped at 65535 on pre-Volta GPUs.",
+    visual: { archetype: "gangs", params: { level: "gang" } },
+    related: ["cuda_kernel", "cuda_thread_idx", "cuda_occupancy"],
+  },
+  {
+    id: "cuda_device_fn", tech: "CUDA", category: "Kernel launch", name: "__device__ / __host__ __device__",
+    signature: "__device__ float sq(float x) { return x*x; }  // GPU only\n\n__host__ __device__ float clamp01(float x) {\n  return fminf(1.f, fmaxf(0.f, x));\n}  // compiled for both CPU and GPU",
+    summary: "__device__ compiles a function for the GPU only; __host__ __device__ emits versions for both — useful for math helpers shared between host and kernel code.",
+    note: "A plain function (no qualifier) is __host__ only. Calling a host function from a kernel is a compile error. The dual qualifier is the cleanest pattern for portable math utilities.",
+    visual: { archetype: "offload", params: { kind: "routine" } },
+    related: ["cuda_kernel", "acc_routine"],
+  },
+  {
+    id: "cuda_launch_bounds", tech: "CUDA", category: "Kernel launch", name: "__launch_bounds__",
+    signature: "__global__ __launch_bounds__(256, 4)\nvoid kernel(float *d_a, int N) { ... }\n// 256 = max threads/block  4 = min resident blocks/SM",
+    summary: "Hints to the compiler the maximum block size and desired min blocks-per-SM — enables more aggressive register allocation without spilling.",
+    note: "If Nsight Compute reports high register spill traffic, reduce maxThreadsPerBlock here to free registers. Don't guess — profile first.",
+    visual: { archetype: "gangs", params: { level: "vector" } },
+    related: ["cuda_occupancy", "cuda_kernel"],
+  },
+  {
+    id: "cuda_malloc", tech: "CUDA", category: "Memory management", name: "cudaMalloc / cudaFree",
+    signature: "float *d_a;\ncudaMalloc(&d_a, N * sizeof(float));\n/* ... GPU work ... */\ncudaFree(d_a);",
+    summary: "Allocate and free device (GPU) memory — the CUDA equivalent of malloc/free, but the pointer is only valid on the device.",
+    note: "Always cudaFree when done to avoid device memory leaks. The returned pointer cannot be dereferenced on the host — doing so is undefined behaviour.",
+    visual: { archetype: "accData", params: { clause: "create" } },
+    related: ["cuda_memcpy", "cuda_malloc_managed", "cuda_memset", "cuda_error"],
+  },
+  {
+    id: "cuda_memcpy", tech: "CUDA", category: "Memory management", name: "cudaMemcpy (H↔D)",
+    signature: "// host → device (send input):\ncudaMemcpy(d_a, h_a, N*sizeof(float), cudaMemcpyHostToDevice);\n// device → host (fetch result):\ncudaMemcpy(h_a, d_a, N*sizeof(float), cudaMemcpyDeviceToHost);",
+    summary: "Copy data between host (CPU) and device (GPU) memory — blocking: it implicitly synchronises the device before returning.",
+    note: "Use cudaMemcpyAsync with a stream and pinned host memory to overlap copies with kernel execution. The synchronous form is safe but hides no latency.",
+    visual: { archetype: "accData", params: { clause: "copy" } },
+    related: ["cuda_malloc", "cuda_memcpy_async", "cuda_pinned", "cuda_stream"],
+  },
+  {
+    id: "cuda_memset", tech: "CUDA", category: "Memory management", name: "cudaMemset",
+    signature: "cudaMemset(d_a, 0, N * sizeof(float));  // zero the buffer\ncudaMemset(d_flags, -1, count);         // fill with 0xFF bytes",
+    summary: "Fill device memory with a byte pattern — the GPU equivalent of memset for initialising device arrays.",
+    note: "Sets bytes, not values: cudaMemset(p, 1, n) fills with byte 0x01, not the integer 1. For arbitrary float/int values, write a small init kernel or use cudaMemcpyAsync from a prefilled host buffer.",
+    visual: { archetype: "accData", params: { clause: "create" } },
+    related: ["cuda_malloc", "cuda_memcpy"],
+  },
+  {
+    id: "cuda_malloc_managed", tech: "CUDA", category: "Memory management", name: "cudaMallocManaged (unified memory)",
+    signature: "float *a;\ncudaMallocManaged(&a, N * sizeof(float));\nkernel<<<grid, block>>>(a, N);\ncudaDeviceSynchronize();  // must sync before host access\nprintf(\"%f\", a[0]);       // valid on host after sync\ncudaFree(a);",
+    summary: "Allocates unified memory — one pointer valid on both CPU and GPU; the driver migrates pages on demand.",
+    note: "Great for prototyping; page-fault migration adds overhead in production. Use cudaMemPrefetchAsync to move pages before the kernel touches them and recover most of that cost.",
+    visual: { archetype: "accData", params: { clause: "copy" } },
+    related: ["cuda_malloc", "cuda_memcpy", "cuda_device_sync"],
+  },
+  {
+    id: "cuda_pinned", tech: "CUDA", category: "Memory management", name: "cudaMallocHost (pinned memory)",
+    signature: "float *h_a;\ncudaMallocHost(&h_a, N * sizeof(float));  // page-locked\ncudaMemcpyAsync(d_a, h_a, bytes,\n  cudaMemcpyHostToDevice, stream);          // truly async\n/* ... compute ... */\ncudaFreeHost(h_a);",
+    summary: "Page-locked (pinned) host memory enables full-speed PCIe DMA and makes cudaMemcpyAsync truly non-blocking.",
+    note: "Pinned memory is not pageable, so the OS can't swap it out — over-allocating it degrades system memory. Pin only large, frequently transferred buffers and free with cudaFreeHost.",
+    visual: { archetype: "accData", params: { clause: "copyin" } },
+    related: ["cuda_memcpy_async", "cuda_stream", "cuda_memcpy"],
+  },
+  {
+    id: "cuda_memcpy_async", tech: "CUDA", category: "Memory management", name: "cudaMemcpyAsync",
+    signature: "cudaMemcpyAsync(d_a, h_a, bytes,\n  cudaMemcpyHostToDevice, stream);\nkernel<<<grid, block, 0, stream>>>(d_a, N);\ncudaMemcpyAsync(h_out, d_out, bytes,\n  cudaMemcpyDeviceToHost, stream);\ncudaStreamSynchronize(stream);",
+    summary: "Non-blocking memory transfer — returns immediately and lets the CPU keep running or overlap with work on another stream.",
+    note: "Requires pinned host memory (cudaMallocHost) to be truly async; pageable buffers fall back to synchronous. Chain copy→kernel→copy on one stream for simple overlap; use two streams to pipeline across iterations.",
+    visual: { archetype: "accData", params: { clause: "copy" } },
+    related: ["cuda_stream", "cuda_pinned", "cuda_event"],
+  },
+  {
+    id: "cuda_shared", tech: "CUDA", category: "Shared memory", name: "__shared__",
+    signature: "__global__ void kernel(float *d_a) {\n  __shared__ float tile[256];  // on-chip, shared by block\n  tile[threadIdx.x] = d_a[blockIdx.x*blockDim.x + threadIdx.x];\n  __syncthreads();             // fence before cross-thread read\n  float v = tile[(threadIdx.x+1) % blockDim.x]; /* ... */\n}",
+    summary: "On-chip shared memory, shared by all threads in a block — ~100× lower latency than global DRAM and the primary tool for data reuse inside a block.",
+    note: "Limited to ~48–96 KB per SM, split across all resident blocks. Access patterns matter: strided access causes bank conflicts (32-bank, 4-byte interleaved). Always __syncthreads() after writing before reading across threads.",
+    visual: { archetype: "dataSharing", params: { clause: "shared" } },
+    related: ["cuda_syncthreads", "cuda_bank_conflicts", "cuda_kernel"],
+  },
+  {
+    id: "cuda_bank_conflicts", tech: "CUDA", category: "Shared memory", name: "Bank conflicts",
+    signature: "// 32 banks, 4-byte wide (stride-1 = conflict-free):\ntile[threadIdx.x] += 1;          // GOOD: each thread → own bank\n// stride-32 = 32-way conflict (all threads → bank 0):\ntile[threadIdx.x * 32] += 1;    // BAD\n// fix: pad by 1 element per row\n__shared__ float t[NUM_ROWS][32 + 1];",
+    summary: "Shared memory is divided into 32 banks; simultaneous accesses to the same bank serialise — a bank conflict.",
+    note: "Stride-1 (adjacent addresses) is conflict-free. Stride-32 is the worst case: 32-way serialisation and 32× slowdown. Padding each shared-memory row by one element breaks repeated-stride patterns in 2-D tiles.",
+    visual: { archetype: "dataSharing", params: { clause: "shared" } },
+    related: ["cuda_shared", "cuda_syncthreads", "cuda_coalescing"],
+  },
+  {
+    id: "cuda_syncthreads", tech: "CUDA", category: "Synchronization", name: "__syncthreads()",
+    signature: "tile[threadIdx.x] = d_a[i];      // write\n__syncthreads();                  // ALL threads in block reach here\nfloat v = tile[(threadIdx.x+1) % blockDim.x]; // safe read",
+    summary: "A barrier for all threads in a block — no thread proceeds until every thread has reached this call.",
+    note: "__syncthreads() synchronises within a block only. There is no built-in cross-block barrier inside a kernel — end the kernel and call cudaDeviceSynchronize() on the host instead.",
+    visual: { archetype: "barrier", params: { kind: "barrier" } },
+    related: ["cuda_shared", "cuda_device_sync", "cuda_syncwarp"],
+  },
+  {
+    id: "cuda_device_sync", tech: "CUDA", category: "Synchronization", name: "cudaDeviceSynchronize()",
+    signature: "kernel<<<grid, block>>>(d_a, N);\ncudaDeviceSynchronize();   // host blocks until GPU done\ncudaMemcpy(h_a, d_a, ..., cudaMemcpyDeviceToHost); // safe",
+    summary: "Blocks the calling CPU thread until all previously issued GPU work on the device completes.",
+    note: "The blocking cudaMemcpy implies this; you don't need an extra cudaDeviceSynchronize before it. For finer control — waiting on one stream only — use cudaStreamSynchronize(stream) or cudaEventSynchronize(event).",
+    visual: { archetype: "barrier", params: { kind: "barrier" } },
+    related: ["cuda_syncthreads", "cuda_stream", "cuda_event"],
+  },
+  {
+    id: "cuda_atomics", tech: "CUDA", category: "Synchronization", name: "atomicAdd / atomicCAS / atomicMax",
+    signature: "atomicAdd(&d_count, 1);            // fetch-and-add (int or float)\natomicMax(&d_max, local_val);      // update only if val > *d_max\nint old = atomicCAS(&d_lock, 0, 1); // compare-and-swap (mutex)",
+    summary: "Hardware-atomic read-modify-write on global or shared memory — accumulate values across threads without races.",
+    note: "Contention on a single global address serialises warps and kills throughput. Reduce per warp with __shfl_down_sync first, then one atomicAdd per warp — 32× less contention.",
+    visual: { archetype: "criticalAtomic", params: { kind: "atomic" } },
+    related: ["cuda_shfl", "cuda_shared", "omp_atomic"],
+  },
+  {
+    id: "cuda_syncwarp", tech: "CUDA", category: "Synchronization", name: "__syncwarp / warp voting",
+    signature: "__syncwarp();                // barrier for the 32-thread warp\n__ballot_sync(0xffffffff, pred); // bitmask: which lanes have pred\n__all_sync(0xffffffff, pred);    // true iff ALL active lanes do\n__any_sync(0xffffffff, pred);    // true iff ANY active lane does",
+    summary: "Warp-scope sync and voting — cheaper than __syncthreads() because they operate on the 32 threads that physically execute together.",
+    note: "Required for any intra-warp shared-memory communication on Volta+ (SM 7.0+) because independent thread scheduling means the warp can now diverge inside a block.",
+    visual: { archetype: "barrier", params: { kind: "barrier" } },
+    related: ["cuda_shfl", "cuda_syncthreads"],
+  },
+  {
+    id: "cuda_shfl", tech: "CUDA", category: "Warp primitives", name: "__shfl_down_sync (warp reduction)",
+    signature: "__device__ float warpReduceSum(float val) {\n  for (int d = 16; d > 0; d >>= 1)\n    val += __shfl_down_sync(0xffffffff, val, d);\n  return val;  // lane 0 holds the sum\n}",
+    summary: "Warp-level shuffle: a thread reads another thread's register directly — no shared memory needed, zero bank conflicts, ~4× faster than a shared-memory reduction.",
+    note: "All 32 lanes must participate (active mask 0xffffffff). Result lands on lane 0; broadcast with __shfl_sync if all lanes need it. Requires CUDA 9+ and SM ≥ 7.0.",
+    visual: { archetype: "reduction", params: { threads: 4 } },
+    related: ["cuda_atomics", "cuda_shared", "cuda_syncwarp"],
+  },
+  {
+    id: "cuda_stream", tech: "CUDA", category: "Concurrency", name: "cudaStream_t",
+    signature: "cudaStream_t s1, s2;\ncudaStreamCreate(&s1); cudaStreamCreate(&s2);\nkernelA<<<grid, block, 0, s1>>>(d_a, N);\ncudaMemcpyAsync(d_b, h_b, bytes, cudaMemcpyHostToDevice, s2);\ncudaStreamSynchronize(s1);\ncudaStreamDestroy(s1); cudaStreamDestroy(s2);",
+    summary: "A stream is a GPU work queue — operations in different streams can execute concurrently, enabling compute+transfer overlap.",
+    note: "The default stream (0) serialises with all other streams. Create non-NULL streams to get real concurrency. Use cudaStreamWaitEvent to express cross-stream dependencies.",
+    visual: { archetype: "forkJoin", params: { threads: 3 } },
+    related: ["cuda_event", "cuda_memcpy_async", "cuda_device_sync"],
+  },
+  {
+    id: "cuda_event", tech: "CUDA", category: "Concurrency", name: "cudaEvent_t",
+    signature: "cudaEvent_t t0, t1;\ncudaEventCreate(&t0); cudaEventCreate(&t1);\ncudaEventRecord(t0);\nkernel<<<grid, block>>>(d_a, N);\ncudaEventRecord(t1);\ncudaEventSynchronize(t1);\nfloat ms; cudaEventElapsedTime(&ms, t0, t1);\nprintf(\"%.3f ms\\n\", ms);",
+    summary: "GPU timestamps and synchronisation points — the correct way to time kernels and express cross-stream dependencies.",
+    note: "CPU timers (omp_get_wtime, clock()) measure host time, not GPU time. cudaEventElapsedTime gives the true kernel duration. Use cudaStreamWaitEvent(stream, event) to make one stream wait for a point in another.",
+    visual: { archetype: "barrier", params: { kind: "barrier" } },
+    related: ["cuda_stream", "cuda_device_sync"],
+  },
+  {
+    id: "cuda_constant", tech: "CUDA", category: "Memory model", name: "__constant__",
+    signature: "__constant__ float c_weights[256];  // 64 KB broadcast cache\n// host upload (before kernel):\ncudaMemcpyToSymbol(c_weights, h_weights, 256*sizeof(float));\n// kernel: read c_weights[i] — cached, broadcast to all threads",
+    summary: "A 64 KB GPU region that is cached and broadcast to all threads reading the same address simultaneously — ideal for lookup tables and filter kernels.",
+    note: "Uniform access (all threads read the same index) is fast. Divergent access (each thread reads a different index) serialises through the cache and erases the benefit.",
+    visual: { archetype: "dataSharing", params: { clause: "shared" } },
+    related: ["cuda_shared", "cuda_memcpy", "cuda_coalescing"],
+  },
+  {
+    id: "cuda_coalescing", tech: "CUDA", category: "Memory model", name: "Memory coalescing",
+    signature: "// COALESCED: 32 threads → 32 consecutive floats (1 transaction)\nd_a[blockIdx.x * blockDim.x + threadIdx.x] = val;\n\n// UNCOALESCED: stride-N (up to 32 transactions, N× slower)\nd_a[(blockIdx.x * blockDim.x + threadIdx.x) * stride] = val;",
+    summary: "A warp's 32 threads coalesce their global memory accesses into one transaction when they touch consecutive addresses — non-coalesced access multiplies DRAM traffic by up to 32×.",
+    note: "Prefer SoA (struct of arrays) layout over AoS (array of structs) for GPU data: SoA gives each thread a consecutive element; AoS gives strided accesses across fields. Profile with Nsight Compute's 'Global Memory Access Pattern' metric.",
+    visual: { archetype: "accData", params: { clause: "copy" } },
+    related: ["cuda_shared", "cuda_bank_conflicts", "cuda_constant"],
+  },
+  {
+    id: "cuda_occupancy", tech: "CUDA", category: "Performance", name: "cudaOccupancyMaxPotentialBlockSize",
+    signature: "int minGrid, block;\ncudaOccupancyMaxPotentialBlockSize(\n  &minGrid, &block, myKernel, 0, 0);\nint grid = (N + block - 1) / block;\nmyKernel<<<grid, block>>>(d_a, N);",
+    summary: "Asks the runtime for the block size that maximises SM occupancy for a given kernel — removes the guesswork from the launch configuration.",
+    note: "High occupancy helps hide memory latency by keeping the warp scheduler busy, but it isn't always fastest (it can hurt L1 cache and register pressure). Profile first.",
+    visual: { archetype: "gangs", params: { level: "gang" } },
+    related: ["cuda_kernel", "cuda_dim3", "cuda_device_prop", "cuda_launch_bounds"],
+  },
+  {
+    id: "cuda_device_prop", tech: "CUDA", category: "Performance", name: "cudaGetDeviceProperties",
+    signature: "cudaDeviceProp p;\ncudaGetDeviceProperties(&p, 0);\nprintf(\"%s  SM %d.%d  %d SMs  %zu MB\\n\",\n  p.name, p.major, p.minor,\n  p.multiProcessorCount, p.totalGlobalMem>>20);\n// also: p.sharedMemPerBlock, p.warpSize, p.maxThreadsPerBlock",
+    summary: "Query hardware specs at runtime: device name, compute capability, SM count, total memory, shared memory per block, warp size, max threads.",
+    note: "Always gate features (warp primitives, tensor cores, cooperative groups) on the compute capability you query here — never hardcode SM ≥ 7.0 assumptions.",
+    visual: { archetype: "offload", params: { kind: "parallel" } },
+    related: ["cuda_occupancy", "cuda_kernel", "cuda_visible_devices"],
+  },
+  {
+    id: "cuda_error", tech: "CUDA", category: "Performance", name: "cudaGetLastError / CUDA_CHECK macro",
+    signature: "// after a kernel:\ncudaError_t e = cudaGetLastError();\nif (e != cudaSuccess)\n  fprintf(stderr, \"%s\\n\", cudaGetErrorString(e));\n// production pattern:\n#define CUDA_CHECK(c) do { cudaError_t _e=(c); \\\n  if(_e!=cudaSuccess){fprintf(stderr,\"%s %s:%d\\n\", \\\n  cudaGetErrorString(_e),__FILE__,__LINE__);exit(1);}}while(0)",
+    summary: "Kernel launches are asynchronous — cudaGetLastError catches launch failures (bad grid/block, out of resources) after the fact.",
+    note: "Wrap every API call with a CUDA_CHECK macro. For errors inside the kernel body (illegal memory access, stack overflow), call cudaDeviceSynchronize() then cudaGetLastError() to flush them to the host.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } },
+    related: ["cuda_kernel", "cuda_device_sync", "cuda_malloc"],
+  },
+  {
+    id: "cuda_visible_devices", tech: "CUDA", category: "Performance", name: "CUDA_VISIBLE_DEVICES",
+    signature: "export CUDA_VISIBLE_DEVICES=0        # GPU 0 only\nexport CUDA_VISIBLE_DEVICES=0,2      # GPUs 0 and 2 (renumbered 0,1)\nexport CUDA_VISIBLE_DEVICES=\"\"        # hide all GPUs\n# Slurm sets this automatically with --gres=gpu:N",
+    summary: "Controls which physical GPUs a CUDA program sees — device numbering inside the program follows the list order.",
+    note: "Never hardcode physical GPU ids in cluster jobs; Slurm sets CUDA_VISIBLE_DEVICES so device 0 inside your process is always the allocated GPU.",
+    visual: { archetype: "offload", params: { kind: "parallel" } },
+    related: ["slurm_gpu", "cuda_device_prop"],
+  },
 ];
 
-export const TECHS: Tech[] = ["OpenMP", "MPI", "OpenACC", "Slurm", "pthreads"];
+export const TECHS: Tech[] = ["OpenMP", "MPI", "OpenACC", "Slurm", "pthreads", "CUDA"];
 export const categoriesFor = (tech: Tech) =>
   Array.from(new Set(ENTRIES.filter((e) => e.tech === tech).map((e) => e.category)));
 
@@ -1515,4 +1725,8 @@ export const ESSENTIAL = new Set<string>([
   "slurm_sbatch", "slurm_srun", "slurm_squeue", "slurm_scancel", "slurm_nodes", "slurm_gpu",
   // pthreads
   "pt_create", "pt_join", "pt_mutex", "pt_cond", "pt_barrier",
+  // CUDA
+  "cuda_kernel", "cuda_thread_idx", "cuda_malloc", "cuda_memcpy",
+  "cuda_shared", "cuda_syncthreads", "cuda_device_sync", "cuda_atomics",
+  "cuda_stream", "cuda_error", "cuda_coalescing",
 ]);
