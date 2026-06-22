@@ -1389,6 +1389,71 @@ export const ENTRIES: RefEntry[] = [
     related: ["slurm_array", "slurm_sbatch"],
   },
 
+  {
+    id: "slurm_sinfo", tech: "Slurm", category: "Monitoring", name: "sinfo",
+    signature: "sinfo                     # full overview\nsinfo -p gpu -o '%N %G %t %m'   # GPU partition detail\nsinfo -N -l               # per-node view",
+    summary: "Show the cluster's partitions, nodes, and their state — the first thing to check before sizing a job.",
+    note: "Node states: idle = free, alloc = in use, mix = partially allocated, drain/down = unavailable. Use sinfo to match your --nodes/--ntasks to what's actually available.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } },
+    related: ["slurm_sbatch", "slurm_squeue"],
+  },
+  {
+    id: "slurm_dependency", tech: "Slurm", category: "Advanced", name: "--dependency",
+    signature: "#SBATCH --dependency=afterok:12345     # run after job 12345 succeeds\n#SBATCH --dependency=afterany:12345    # run regardless of exit code\n#SBATCH --dependency=singleton         # only one job with this name at a time",
+    summary: "Chain jobs into a pipeline — this job waits until the specified condition on another job is met.",
+    note: "Common pattern: submit a build job, then submit the run with --dependency=afterok:$BUILDID, then the analysis with --dependency=afterok:$RUNID. Use $(sbatch --parsable script.sh) to capture the job ID for chaining.",
+    visual: { archetype: "barrier", params: { threads: 3 } },
+    related: ["slurm_sbatch", "slurm_array"],
+  },
+  {
+    id: "slurm_mem", tech: "Slurm", category: "Resource directives", name: "--mem / --mem-per-cpu",
+    signature: "#SBATCH --mem=64G              # total memory per node\n#SBATCH --mem-per-cpu=4G       # memory per allocated CPU core\n#SBATCH --mem=0                # request all available memory",
+    summary: "Request memory for your job — jobs that exceed this limit are killed by the OOM handler.",
+    note: "If you don't request enough, the kernel OOM-killer terminates your process mid-run with no checkpoint. If you request too much, your job waits longer in the queue. Check sacct --format=MaxRSS after a test run to right-size.",
+    visual: { archetype: "ranksMemory", params: { threads: 2 } },
+    related: ["slurm_nodes", "slurm_sacct", "slurm_seff"],
+  },
+  {
+    id: "slurm_time", tech: "Slurm", category: "Resource directives", name: "--time",
+    signature: "#SBATCH --time=04:00:00        # 4 hours\n#SBATCH --time=1-12:00:00      # 1 day 12 hours\n#SBATCH --time=30:00           # 30 minutes",
+    summary: "Set the maximum wall-clock time — the job is killed when this limit is reached.",
+    note: "Shorter time limits often get higher scheduling priority (backfill). Request 2× your expected runtime for safety, but not 10× — the scheduler uses your time limit to plan backfill slots.",
+    visual: { archetype: "timeline", params: { threads: 4 } },
+    related: ["slurm_sbatch", "slurm_nodes"],
+  },
+  {
+    id: "slurm_output", tech: "Slurm", category: "Job submission", name: "--output / --error",
+    signature: "#SBATCH --output=logs/%x_%j.out    # %x=job name, %j=job ID\n#SBATCH --error=logs/%x_%j.err\n#SBATCH --output=/dev/null          # discard stdout",
+    summary: "Redirect job stdout and stderr to files — by default both go to slurm-<jobid>.out in the submit directory.",
+    note: "Create the output directory before submitting (mkdir -p logs). Use %A for array job ID and %a for array task index.",
+    visual: { archetype: "ranksMemory", params: { threads: 2 } },
+    related: ["slurm_sbatch", "slurm_array"],
+  },
+  {
+    id: "slurm_exclusive", tech: "Slurm", category: "Resource directives", name: "--exclusive",
+    signature: "#SBATCH --exclusive              # whole-node allocation\n#SBATCH --nodes=1 --exclusive    # one full node, no sharing",
+    summary: "Request exclusive access to entire nodes — no other jobs share the hardware.",
+    note: "Essential for benchmarking: shared nodes introduce cache/memory/network interference from other users' jobs. For production runs with consistent timing, always use --exclusive.",
+    visual: { archetype: "ranksMemory", params: { threads: 4 } },
+    related: ["slurm_nodes", "slurm_sbatch"],
+  },
+  {
+    id: "slurm_scontrol", tech: "Slurm", category: "Monitoring", name: "scontrol",
+    signature: "scontrol show job 12345        # full job details\nscontrol hold 12345            # prevent from starting\nscontrol release 12345         # allow to start\nscontrol show partition gpu",
+    summary: "Inspect and control jobs, nodes, and partitions — the admin-level Slurm command.",
+    note: "scontrol show job gives you everything: the submit command, resource request, node list, start/end time, exit code — invaluable for debugging failed jobs.",
+    visual: { archetype: "ranksMemory", params: { threads: 3 } },
+    related: ["slurm_squeue", "slurm_sacct"],
+  },
+  {
+    id: "slurm_constraint", tech: "Slurm", category: "Resource directives", name: "--constraint",
+    signature: "#SBATCH --constraint=avx512      # need AVX-512 capable nodes\n#SBATCH --constraint=a100        # need A100 GPUs\n#SBATCH --constraint='[rack1|rack2]'  # locality",
+    summary: "Select nodes by feature tags — ensures your job runs on hardware that matches its requirements.",
+    note: "Features are defined by the admin (scontrol show node <name>). Common uses: CPU microarchitecture (avx512, epyc), GPU type (a100, h100), network (ib, hdr), or rack locality for communication-heavy MPI jobs.",
+    visual: { archetype: "ranksMemory", params: { threads: 2 } },
+    related: ["slurm_nodes", "slurm_gpu", "slurm_sinfo"],
+  },
+
   /* ===================== pthreads ===================== */
   {
     id: "pt_create", tech: "pthreads", category: "Thread lifecycle", name: "pthread_create",
@@ -1493,6 +1558,55 @@ export const ENTRIES: RefEntry[] = [
     note: "Prefer __thread or thread_local (C11/C++11) for static TLS, which the compiler optimises better. Use pthread_key only for dynamic TLS or when you need the per-thread destructor.",
     visual: { archetype: "dataSharing", params: {} },
     related: ["pt_create"],
+  },
+
+  {
+    id: "pt_self", tech: "pthreads", category: "Thread lifecycle", name: "pthread_self / pthread_equal",
+    signature: "pthread_t me = pthread_self();\nif (pthread_equal(me, main_tid))\n  printf(\"I am the main thread\\n\");",
+    summary: "Get the calling thread's ID and compare thread IDs — the only portable way to check thread identity.",
+    note: "pthread_t is opaque — you cannot compare with == on all platforms. Always use pthread_equal. Useful for implementing leader-election patterns without a barrier.",
+    visual: { archetype: "forkJoin", params: { threads: 4 } },
+    related: ["pt_create"],
+  },
+  {
+    id: "pt_cancel", tech: "pthreads", category: "Thread lifecycle", name: "pthread_cancel",
+    signature: "pthread_cancel(tid);   // request cancellation\n// target thread:\npthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);\npthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);\npthread_testcancel();  // explicit cancellation point",
+    summary: "Request that a thread terminate — the thread is cancelled at its next cancellation point (e.g. pthread_testcancel, read, write, sleep).",
+    note: "Deferred cancellation (the default) only acts at cancellation points — this is safer than asynchronous cancellation, which can leave mutexes locked. Pair with pthread_cleanup_push for resource cleanup.",
+    visual: { archetype: "forkJoin", params: { threads: 4 } },
+    related: ["pt_create", "pt_join", "pt_cleanup"],
+  },
+  {
+    id: "pt_cleanup", tech: "pthreads", category: "Thread lifecycle", name: "pthread_cleanup_push / pop",
+    signature: "pthread_cleanup_push(cleanup_fn, resource);\n  /* work that might be cancelled */\n  pthread_mutex_lock(&mtx);\n  /* ... */\n  pthread_mutex_unlock(&mtx);\npthread_cleanup_pop(0);   // 0 = don't execute, just remove",
+    summary: "Register a cleanup handler that runs if the thread is cancelled or calls pthread_exit — the pthreads equivalent of a destructor or finally block.",
+    note: "Push and pop must be in the same lexical scope (they expand to { and }). Always push a mutex-unlock handler before a cancellation point inside a locked region.",
+    visual: { archetype: "barrier", params: { threads: 3 } },
+    related: ["pt_cancel", "pt_mutex"],
+  },
+  {
+    id: "pt_spinlock", tech: "pthreads", category: "Synchronization", name: "pthread_spinlock_t",
+    signature: "pthread_spinlock_t spl;\npthread_spin_init(&spl, PTHREAD_PROCESS_PRIVATE);\npthread_spin_lock(&spl);\n  /* very short critical section */\npthread_spin_unlock(&spl);\npthread_spin_destroy(&spl);",
+    summary: "A busy-wait lock — the thread spins in a tight loop instead of sleeping. Faster than a mutex for very short critical sections.",
+    note: "Spinlocks waste CPU cycles while waiting and can cause priority inversion on preemptive systems. Only use when the critical section is shorter than a context-switch (~1-10 μs). For anything longer, a mutex that sleeps is better.",
+    visual: { archetype: "criticalAtomic", params: { kind: "atomic" } },
+    related: ["pt_mutex", "pt_trylock"],
+  },
+  {
+    id: "pt_timedlock", tech: "pthreads", category: "Synchronization", name: "pthread_mutex_timedlock",
+    signature: "struct timespec ts;\nclock_gettime(CLOCK_REALTIME, &ts);\nts.tv_sec += 5;   // 5 second timeout\nint rc = pthread_mutex_timedlock(&mtx, &ts);\nif (rc == ETIMEDOUT) { /* lock not acquired */ }",
+    summary: "Try to acquire a mutex with a timeout — returns ETIMEDOUT if the lock isn't available within the deadline.",
+    note: "Useful for deadlock detection: if a thread can't acquire a lock within a reasonable time, something is probably wrong. Also enables try-lock-or-skip patterns without busy-waiting.",
+    visual: { archetype: "criticalAtomic", params: { kind: "critical" } },
+    related: ["pt_mutex", "pt_trylock"],
+  },
+  {
+    id: "pt_yield", tech: "pthreads", category: "Advanced", name: "sched_yield",
+    signature: "#include <sched.h>\nsched_yield();   // voluntarily give up the CPU",
+    summary: "Yield the CPU to another ready thread — a hint to the scheduler that this thread has nothing urgent to do right now.",
+    note: "Rarely needed in well-structured parallel code. Useful in spin-wait loops to avoid wasting energy (while (!ready) sched_yield()), but a condition variable is almost always better.",
+    visual: { archetype: "worksharing", params: { threads: 4 } },
+    related: ["pt_cond", "pt_spinlock"],
   },
 
   /* ===================== CUDA ===================== */
@@ -1723,8 +1837,9 @@ export const ESSENTIAL = new Set<string>([
   "acc_parallel_loop", "acc_kernels", "acc_data", "acc_copyin",
   // Slurm
   "slurm_sbatch", "slurm_srun", "slurm_squeue", "slurm_scancel", "slurm_nodes", "slurm_gpu",
+  "slurm_sinfo", "slurm_mem", "slurm_time",
   // pthreads
-  "pt_create", "pt_join", "pt_mutex", "pt_cond", "pt_barrier",
+  "pt_create", "pt_join", "pt_mutex", "pt_cond", "pt_barrier", "pt_spinlock",
   // CUDA
   "cuda_kernel", "cuda_thread_idx", "cuda_malloc", "cuda_memcpy",
   "cuda_shared", "cuda_syncthreads", "cuda_device_sync", "cuda_atomics",
