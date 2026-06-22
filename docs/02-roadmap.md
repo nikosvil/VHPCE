@@ -152,14 +152,21 @@ with 2D Canvas scenes in `packages/viz`. Flagship count: 9 → 16.
 memory, synchronization, warp primitives, concurrency, memory model, performance), 11 essentials.
 CUDA is now the sixth tech filter tab in `/reference`.
 
-*P5 domain labs started:* The `/modules` hub is live with three engineering simulation mini-labs:
-- **🌊 WaveLab** — 1-D FDTD wave solver (256 cells, reflective/absorptive boundaries, animated waveform)
-- **🌌 NBodyLab** — 32-particle N-body gravity (Barnes–Hut model, animated particle field)
-- **🔢 GemmLab** — C=A×B GEMM (8×8 grids, naïve vs cache-tiled, arithmetic intensity readout)
+*P5 domain labs:* The `/modules` hub is live with six engineering simulation mini-labs:
+- **🌊 WaveLab** — 2-D FDTD wave solver (point/plane/slit sources, Courant stability)
+- **🌌 NBodyLab** — 32-particle N-body gravity (Barnes–Hut model)
+- **🔢 GemmLab** — C=A×B GEMM (naïve vs cache-tiled, arithmetic intensity readout)
+- **📊 FFTLab** — Cooley-Tukey radix-2: butterfly diagram, time/frequency domain, log2(N) stages
+- **🔗 SpMVLab** — CSR sparse matrix-vector multiply: load imbalance across banded/random/power-law patterns
+- **🔻 MultigridLab** — V-cycle vs Jacobi-only: multi-level grid animation, convergence plot
 
 Each lab shows domain-decomp code snippets for serial/OpenMP/MPI/GPU. The hub links to `/lab`
-(Heat Equation) as a fourth domain mini-lab. FEM/CFD/FFT/multigrid modules, classrooms/LMS,
-K8s autoscaling, and PMU counters remain future work.
+(Heat Equation) as a seventh domain mini-lab.
+
+*3D visualization removed:* All React Three Fiber / Three.js code removed. Experiments use 2D
+Canvas scenes only — simpler, faster, no WebGL dependency.
+
+Classrooms/LMS, K8s autoscaling, and PMU counters remain future work.
 
 ---
 

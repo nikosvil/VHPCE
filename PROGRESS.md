@@ -1,6 +1,6 @@
 # VHPCE — Progress Snapshot
 
-_Last updated: 2026-06-18 · branch `main`_
+_Last updated: 2026-06-22 · branch `main`_
 
 **Visual HPC for Engineers** — an interactive performance laboratory.
 **Phases P0–P4 + the Cloud Phase + the engagement & GPU-lesson layer are complete; P5 domain labs underway.**
@@ -23,7 +23,7 @@ This file is the resume point: what's done, how to run it, what changed, and nex
 | **P4** | GPU/CUDA (`{kind:"cuda"}` → `vhpce-cuda`, RTX 5060) + GPU Occupancy, Coalescing, Divergence, Atomics | ✅ done |
 | **Engagement** | Intro, Start (predict-before-you-run), Compare, Play (Race + Quiz + Sandbox + **Kernel Tuner** + Badges), Reference Essentials + ~214 entries (adds CUDA), Playground predict + diagnostics + thread-count explorer, badge + streak system | ✅ done |
 | **Rollout** | LICENSE (AGPL-3.0), rewritten README, SETUP.md, CI (GitHub Actions), devcontainer (Codespaces) | ✅ done |
-| P5 | Engineering domain modules, classrooms/LMS, K8s autoscaling, true PMU counters | 🔄 in progress — Domain Labs hub (`/modules`) live: Wave (FDTD), N-Body, Matrix Multiply (GEMM) |
+| P5 | Engineering domain modules, classrooms/LMS, K8s autoscaling, true PMU counters | 🔄 in progress — Domain Labs hub (`/modules`) live: Wave, N-Body, GEMM, FFT, SpMV, Multigrid |
 
 ### The core idea that holds it together
 One **`ProfileResult` seam** (`@vhpce/profile-schema`). Two producers — the in-browser
@@ -76,26 +76,26 @@ Playground code) go through one async backend; **Model mode is the only offline 
   → `MPI_Sendrecv` halo exchange → CUDA kernel) with links to the matching Reference entry + Flagship
   experiment — the direct tie from the picture to real OpenMP/MPI/GPU code. A live **convergence
   plot** (log-scale max |Δu| per step) shows the solver converging — and **diverging** (red) when α>0.25.
-- **Domain Labs** (`/modules`) — a **P5 engineering-domain hub** (offline, no backend): three
+- **Domain Labs** (`/modules`) — a **P5 engineering-domain hub** (offline, no backend): six
   interactive mini-labs, each with a tab-based view, a live Canvas animation loop, and
   domain-decomposition code snippets for serial / OpenMP / MPI / GPU parallel models:
-  - **🌊 Wave (FDTD)** (`WaveLab`) — 1-D finite-difference time-domain wave solver on a 256-cell
-    grid. Controls: frequency, amplitude, damping, boundary (reflective/absorptive). Animated
-    waveform; code shows `omp parallel for` / `MPI_Sendrecv` ghost exchange / CUDA `__global__`.
-  - **🌌 N-Body Gravity** (`NBodyLab`) — N-body gravitational simulation (32 particles, Barnes–Hut
-    O(N log N) model). Animated particle field; code shows OpenMP, MPI halo broadcast, CUDA kernel.
-  - **🔢 Matrix Multiply** (`GemmLab`) — C = A × B on 8×8 visualisation grids. Naïve mode
-    animates the stride-N column access (B column = cache miss) vs **tiled** mode showing NB×NB
-    blocking (tile stays in L1). Arithmetic intensity readout (AI < 1 = red / 1–4 = amber / > 4
-    ridge = green). Links to `cacheHierarchy`, `cudaCoalesce`, and `simdVec` Flagship experiments.
-  The `/modules` hub links to the existing `/lab` (Heat Equation) as a fourth domain mini-lab.
+  - **🌊 Wave (FDTD)** — 2-D FDTD wave solver. Controls: source type, Courant number, damping.
+  - **🌌 N-Body Gravity** — N-body gravitational simulation (32 particles, Barnes–Hut model).
+  - **🔢 Matrix Multiply (GEMM)** — C = A × B: naïve stride-N vs cache-tiled, arithmetic intensity readout.
+  - **📊 FFT** — Cooley-Tukey radix-2: butterfly diagram animation, time/frequency domain plots,
+    log2(N) stages with N/2 parallel butterflies per stage.
+  - **🔗 Sparse SpMV** — CSR sparse matrix-vector multiply: sparse matrix visualization with access
+    lines, nnz-per-worker bar chart exposing load imbalance (banded vs power-law patterns).
+  - **🔻 Multigrid** — V-cycle solver: multi-level grid visualization with error coloring,
+    convergence plot comparing Jacobi-stall vs O(N) multigrid, restrict/prolongate animation.
+  The `/modules` hub links to the existing `/lab` (Heat Equation) as a seventh domain mini-lab.
 
 - **Flagship** (`/`) — **sixteen experiments**: the original nine (false sharing, synchronization,
   bandwidth saturation, load imbalance, MPI halo exchange, GPU occupancy, GPU coalescing, GPU
   divergence, GPU atomics) plus **seven new** (NUMA Effects, Cache Hierarchy, SIMD Vectorization,
   OpenMP Tasks, GPU Shared Memory, MPI Collectives, Hybrid MPI+OMP), each with: model + **measured**
   data behind a **Model | Measured** toggle; a deterministic what/why/how/expected diagnosis; a
-  **2D | 3D** visualization toggle; D3 scaling chart (+ roofline for bandwidth, occupancy chart for
+  2D Canvas visualization; D3 scaling chart (+ roofline for bandwidth, occupancy chart for
   CUDA). The scaling axis generalizes to **ranks** for MPI (`ExperimentResult.xUnits`); weak scaling
   uses scaled-speedup/efficiency in `buildResult`. The seven new experiments are model-only with 2D
   Canvas scenes (`packages/viz`); no Measured backend yet.
@@ -162,7 +162,7 @@ pnpm --filter web dev           # -> http://localhost:3000
   `http://localhost:8000` (override with `NEXT_PUBLIC_VHPCE_API`).
 - **Routes:** `/intro` (Introduction — orientation), `/start` (Start Here — guided first runs),
   `/learn` (Basics — concept animations), `/reference` (command library — offline),
-  `/modules` (Domain Labs hub — Wave/N-Body/GEMM — offline), `/lab` (Heat-equation mini-lab — offline),
+  `/modules` (Domain Labs hub — Wave/N-Body/GEMM/FFT/SpMV/Multigrid — offline), `/lab` (Heat-equation mini-lab — offline),
   `/` (Flagship — 16 experiments), `/compare` (model vs measured overlay),
   `/playground` (Code Playground), `/play` (Play hub — Race/Quiz/Sandbox/KernelTuner/Badges),
   `POST|GET /api/ask` (LLM, Next route).
@@ -197,16 +197,18 @@ vhpce/
 │           ├─ Playground.tsx      Monaco editor + predict + run/profile + diagnostics + thread explorer
 │           ├─ AskAI.tsx           streaming LLM panel (grounded)
 │           ├─ Nav.tsx             top nav (Intro | Start | Learn | Reference | Labs | Flagship | Compare | Playground | Play)
-│           ├─ Modules.tsx         /modules Domain Labs hub (tabs → WaveLab / NBodyLab / GemmLab + link to /lab)
-│           ├─ modules/WaveLab.tsx   🌊 1-D FDTD wave solver — serial/OpenMP/MPI/GPU code snippets
-│           ├─ modules/NBodyLab.tsx  🌌 N-body gravity (32 particles) — OpenMP/MPI/CUDA variants
-│           ├─ modules/GemmLab.tsx   🔢 GEMM (C=A×B) — naïve vs tiled, AI readout, linked experiments
+│           ├─ Modules.tsx         /modules Domain Labs hub (6 tabs + Heat Equation link)
+│           ├─ modules/WaveLab.tsx   🌊 2-D FDTD wave solver
+│           ├─ modules/NBodyLab.tsx  🌌 N-body gravity (32 particles)
+│           ├─ modules/GemmLab.tsx   🔢 GEMM (C=A×B) — naïve vs tiled
+│           ├─ modules/FFTLab.tsx    📊 FFT — Cooley-Tukey butterfly animation
+│           ├─ modules/SpMVLab.tsx   🔗 Sparse SpMV — CSR, load imbalance
+│           ├─ modules/MultigridLab.tsx 🔻 Multigrid V-cycle vs Jacobi
 │           ├─ Lab.tsx             /lab 2-D heat-equation sim + domain-decomposition overlay
 │           ├─ Learn.tsx           /learn beginner concept cards (+ learn/scenes.ts Canvas animations)
 │           ├─ Reference.tsx       /reference command library (+ reference/archetypes.ts + entries.ts + Essentials filter)
 │           ├─ Term.tsx · glossary.ts   hover-glossary tooltips (/reference + Flagship/Playground metric labels & hints)
-│           ├─ Glossed.tsx          auto-glosser: wraps glossary terms in any prose string with <Term> (Reference/Learn/Playground)
-│           └─ scenes/             R3F 3D hero scenes: Shell + {FalseSharing,Synchronization,Bandwidth,Imbalance,Mpi,Cuda}Scene3D
+│           └─ Glossed.tsx          auto-glosser: wraps glossary terms in any prose string with <Term> (Reference/Learn/Playground)
 │
 ├─ packages/                       shared TS (transpiled by Next, no build step)
 │  ├─ profile-schema/src/index.ts  the seam: ExperimentResult/Explanation types + fmt/clamp
@@ -249,19 +251,18 @@ vhpce/
   cudaSharedMem, mpiCollective, hybridMpi (model-only, 2D Canvas scenes in `packages/viz`).
 - ✅ **CUDA Reference** — 24 entries across 8 categories, 11 essentials; CUDA added as 6th tech
   filter tab in `/reference`.
-- 🔄 **P5 Domain Labs** — `/modules` hub live with WaveLab (FDTD), NBodyLab, GemmLab (GEMM).
-  FEM/CFD/FFT/multigrid modules, classrooms/LMS, K8s autoscaling, PMU counters remain future work.
+- ✅ **3D removal** — all React Three Fiber / Three.js code removed; 2D Canvas only.
+- 🔄 **P5 Domain Labs** — `/modules` hub live with 6 labs: Wave, N-Body, GEMM, FFT, SpMV, Multigrid.
+  Classrooms/LMS, K8s autoscaling, PMU counters remain future work.
 
 ---
 
 ## 6. Next implementation steps
 
-The core product, engagement layer, and three P5 domain labs are complete. Candidate next steps:
+The core product, engagement layer, and six P5 domain labs are complete. Candidate next steps:
 
-1. **More domain modules (P5).** FEM (heat/stress), CFD (Navier-Stokes lid-driven cavity), sparse
-   solvers, FFT, multigrid — each as a new tab in the `/modules` hub, following the WaveLab/NBodyLab/
-   GemmLab pattern (inner component, no `<main>`, tab-based navigation, rAF canvas loop, domain-decomp
-   code snippets for serial/OpenMP/MPI/GPU).
+1. **More domain modules (P5).** FEM (heat/stress), CFD (Navier-Stokes lid-driven cavity) — each as
+   a new tab in the `/modules` hub, following the established lab pattern.
 
 2. **Measured backends for the new experiments.** The 7 new Flagship experiments (numaEffects,
    cacheHierarchy, simdVec, openmpTasks, cudaSharedMem, mpiCollective, hybridMpi) are model-only;
