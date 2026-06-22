@@ -21,7 +21,7 @@ This file is the resume point: what's done, how to run it, what changed, and nex
 | **Cloud** | FastAPI gateway + Redis/Arq job queue; both producers async submit/poll; stdlib runner retired | ✅ done |
 | **P3** | MPI execution (`{kind:"mpi"}` → `vhpce-mpi`) + "MPI Halo Exchange" experiment (strong vs weak) | ✅ done |
 | **P4** | GPU/CUDA (`{kind:"cuda"}` → `vhpce-cuda`, RTX 5060) + GPU Occupancy, Coalescing, Divergence, Atomics | ✅ done |
-| **Engagement** | Intro, Start (predict-before-you-run), Compare, Play (Race + Quiz + Sandbox + **Kernel Tuner** + Badges), Reference Essentials + ~214 entries (adds CUDA), Playground predict + diagnostics + thread-count explorer, badge + streak system | ✅ done |
+| **Engagement** | Intro, Start (predict-before-you-run), Compare, Play (Race + Quiz + Sandbox + **Kernel Tuner** + Badges), Reference Essentials + ~228 entries (adds CUDA), Playground predict + diagnostics + thread-count explorer, badge + streak system | ✅ done |
 | **Rollout** | LICENSE (AGPL-3.0), rewritten README, SETUP.md, CI (GitHub Actions), devcontainer (Codespaces) | ✅ done |
 | P5 | Engineering domain modules, classrooms/LMS, K8s autoscaling, true PMU counters | 🔄 in progress — Domain Labs hub (`/modules`) live: Wave, N-Body, GEMM, FFT, SpMV, Multigrid |
 
@@ -51,7 +51,7 @@ Playground code) go through one async backend; **Model mode is the only offline 
   OpenMP cards → a runnable Playground example (`/playground?ex=…`), MPI cards → the measured
   Flagship experiment (`/?exp=mpiHalo`).
 - **Command Reference** (`/reference`) — a searchable, filterable library of **OpenMP, MPI, OpenACC &
-  CUDA** directives/commands (~214 entries: OpenMP 72 / MPI 59 / OpenACC 27 / **CUDA 24** — incl.
+  CUDA** directives/commands (~228 entries: OpenMP 72 / MPI 59 / OpenACC 27 / **CUDA 24** — incl.
   OpenMP `target` offloading + advanced (metadirective/declare variant) + runtime env; MPI one-sided
   RMA (+ shared windows), parallel I/O, neighborhood collectives, persistent requests, graph
   topologies, dynamic processes; **CUDA**: kernel launch (`__global__`/`__device__`/`launch_bounds`),
