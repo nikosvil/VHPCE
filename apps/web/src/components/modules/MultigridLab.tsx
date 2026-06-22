@@ -342,6 +342,7 @@ export default function MultigridLab() {
   const [method, setMethod] = useState<Method>("vcycle");
   const [model, setModel] = useState<Model>("serial");
   const [playing, setPlaying] = useState(true);
+  const [stepLabel, setStepLabel] = useState("V-cycle 0");
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<MGState>(initMGState(3, 2));
@@ -358,6 +359,7 @@ export default function MultigridLab() {
     stateRef.current = initMGState(l, s);
     currentOp.current = null;
     opTimer.current = 0;
+    setStepLabel("V-cycle 0");
   };
 
   const handleLevels = (v: number) => {
@@ -593,6 +595,7 @@ export default function MultigridLab() {
           if (meth === "vcycle") {
             const op = stepVCycleOp(st);
             currentOp.current = op;
+            setStepLabel(`V-cycle ${st.vcycleCount}`);
           } else {
             /* Jacobi only: just smooth on finest */
             jacobiSmooth(st.u[0], st.f[0], st.sizes[0], st.smoothSteps);
@@ -600,6 +603,7 @@ export default function MultigridLab() {
             const rn = residualNorm(st.u[0], st.f[0], st.sizes[0]);
             st.jacobiResiduals.push(rn);
             currentOp.current = { type: "presmooth", level: 0 };
+            setStepLabel(`iteration ${st.jacobiCount}`);
           }
 
           /* also step Jacobi comparison line while vcycle runs */
@@ -777,11 +781,7 @@ export default function MultigridLab() {
             <button className="step-btn" onClick={() => reset()}>
               ↻ Reset
             </button>
-            <span className="pg-hint">
-              {method === "vcycle"
-                ? `V-cycle ${stateRef.current.vcycleCount}`
-                : `iteration ${stateRef.current.jacobiCount}`}
-            </span>
+            <span className="pg-hint">{stepLabel}</span>
           </div>
         </div>
         <div className="ctrl">
