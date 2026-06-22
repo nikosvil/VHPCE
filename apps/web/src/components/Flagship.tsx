@@ -1,22 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
-import FalseSharingScene3D from "./scenes/FalseSharingScene3D";
-import SynchronizationScene3D from "./scenes/SynchronizationScene3D";
-import BandwidthScene3D from "./scenes/BandwidthScene3D";
-import ImbalanceScene3D from "./scenes/ImbalanceScene3D";
-import MpiScene3D from "./scenes/MpiScene3D";
-import CudaScene3D from "./scenes/CudaScene3D";
-import CoalesceScene3D from "./scenes/CoalesceScene3D";
-import DivergenceScene3D from "./scenes/DivergenceScene3D";
-import AtomicsScene3D from "./scenes/AtomicsScene3D";
-import NUMAScene3D from "./scenes/NUMAScene3D";
-import CacheHierarchyScene3D from "./scenes/CacheHierarchyScene3D";
-import SimdVecScene3D from "./scenes/SimdVecScene3D";
-import OpenmpTasksScene3D from "./scenes/OpenmpTasksScene3D";
-import CudaSharedMemScene3D from "./scenes/CudaSharedMemScene3D";
-import MpiCollectiveScene3D from "./scenes/MpiCollectiveScene3D";
-import HybridMpiScene3D from "./scenes/HybridMpiScene3D";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AskAI from "./AskAI";
 import {
   Models, Measured, runnerSpec, EXPERIMENTS, MAXP, TRIAD_AI,
@@ -32,25 +16,6 @@ import { GLOSSARY } from "./glossary";
 // Wrap a label in a hover-glossary <Term> when it matches a known term, else plain text.
 const termify = (label: string) =>
   GLOSSARY[label.toLowerCase()] ? <Term k={label.toLowerCase()}>{label}</Term> : label;
-
-const SCENES_3D: Record<string, ComponentType<{ result: ExperimentResult | null }>> = {
-  falseSharing: FalseSharingScene3D,
-  synchronization: SynchronizationScene3D,
-  bandwidth: BandwidthScene3D,
-  imbalance: ImbalanceScene3D,
-  mpiHalo: MpiScene3D,
-  cuda: CudaScene3D,
-  cudaCoalesce: CoalesceScene3D,
-  cudaDivergence: DivergenceScene3D,
-  cudaAtomics: AtomicsScene3D,
-  numaEffects: NUMAScene3D,
-  cacheHierarchy: CacheHierarchyScene3D,
-  simdVec: SimdVecScene3D,
-  openmpTasks: OpenmpTasksScene3D,
-  cudaSharedMem: CudaSharedMemScene3D,
-  mpiCollective: MpiCollectiveScene3D,
-  hybridMpi: HybridMpiScene3D,
-};
 
 const stripHtml = (s: string) => s.replace(/<[^>]+>/g, "");
 
@@ -138,7 +103,6 @@ const ATOMS = [1, 4, 16, 64, 256, 1024, 4096];
 export default function Flagship() {
   const [exp, setExp] = useState<ExpId>("falseSharing");
   const [mode, setMode] = useState<Mode>("model");
-  const [view, setView] = useState<"2d" | "3d">("3d");
   const [params, setParams] = useState<Record<ExpId, ExpParams>>(DEFAULT_PARAMS);
   const [measuredResult, setMeasuredResult] = useState<ExperimentResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -163,9 +127,6 @@ export default function Flagship() {
 
   const p = params[exp];
   const measured = mode === "measured";
-  const has2D = exp in scenes;          // new experiments have no 2D canvas scene
-  const use3D = !has2D || view === "3d"; // force 3D when no 2D scene exists
-  const Scene3D = SCENES_3D[exp];
   const isCuda = exp === "cuda";
   const isCoalesce = exp === "cudaCoalesce";
   const isDiverge = exp === "cudaDivergence";
@@ -274,9 +235,8 @@ export default function Flagship() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Canvas scene animation loop (2D mode only; reads latest result via ref)
+  // Canvas scene animation loop (reads latest result via ref)
   useEffect(() => {
-    if (use3D) return;
     const cv = canvasRef.current;
     if (!cv) return;
     const ctx = cv.getContext("2d");
@@ -305,7 +265,7 @@ export default function Flagship() {
       draw(0);
     }
     return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); };
-  }, [use3D]);
+  }, []);
 
   // Reduced-motion: draw a single static frame whenever the result changes
   useEffect(() => {
@@ -360,7 +320,7 @@ export default function Flagship() {
 
       <nav className="tabs">
         {EXPERIMENTS.map((e, i) => (
-          <button key={e.id} className={"tab" + (e.id === exp ? " active" : "")} onClick={() => { setExp(e.id as ExpId); if (MODEL_ONLY.has(e.id as ExpId)) setMode("model"); if (!(e.id in scenes)) setView("3d"); }}>
+          <button key={e.id} className={"tab" + (e.id === exp ? " active" : "")} onClick={() => { setExp(e.id as ExpId); if (MODEL_ONLY.has(e.id as ExpId)) setMode("model"); }}>
             <span className="ix">{String(i + 1).padStart(2, "0")}</span>{e.name}
           </button>
         ))}
@@ -618,15 +578,9 @@ export default function Flagship() {
         <section className="card vizwrap">
           <h2>
             <span>Visualization</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span className="view-toggle">
-                <button className={!use3D ? "on" : ""} disabled={!has2D} onClick={() => setView("2d")} title={!has2D ? "2D view not available for this experiment" : undefined}>2D</button>
-                <button className={use3D ? "on" : ""} onClick={() => setView("3d")}>3D</button>
-              </span>
-              <span className="scene-tag">{expMeta.scene}</span>
-            </span>
+            <span className="scene-tag">{expMeta.scene}</span>
           </h2>
-          {use3D ? <Scene3D result={result} /> : <canvas className="viz" ref={canvasRef} />}
+          <canvas className="viz" ref={canvasRef} />
         </section>
 
         <section className="card">
