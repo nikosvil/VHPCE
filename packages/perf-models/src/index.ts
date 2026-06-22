@@ -498,10 +498,17 @@ export const Models: Record<string, (p: any) => ExperimentResult> = {
 };
 
 /* ===================== Producer B — measured adapters ===================== */
-export function runnerSpec(exp: string, p: any): { bexp: string; variant: string } {
+export function runnerSpec(exp: string, p: any): { bexp: string; variant: string; kind?: string; experiment?: string } {
   if (exp === "falseSharing") return { bexp: "falsesharing", variant: p.padded ? "padded" : "shared" };
   if (exp === "synchronization") return { bexp: "sync", variant: p.mode };
   if (exp === "bandwidth") return { bexp: "bandwidth", variant: "triad" };
+  if (exp === "numaEffects") return { bexp: "numaeffects", variant: p.numaAware ? "aware" : "unaware" };
+  if (exp === "cacheHierarchy") return { bexp: "cachehierarchy", variant: p.level || "DRAM" };
+  if (exp === "simdVec") return { bexp: "simdvec", variant: p.layout || "SoA" };
+  if (exp === "openmpTasks") return { bexp: "tasks", variant: p.granularity || "coarse" };
+  if (exp === "cudaSharedMem") return { kind: "cuda", experiment: "sharedmem", bexp: "sharedmem", variant: p.padding ? "padded" : "unpadded" };
+  if (exp === "mpiCollective") return { kind: "mpi", experiment: "collective", bexp: "collective", variant: p.collective || "broadcast" };
+  if (exp === "hybridMpi") return { kind: "mpi", experiment: "hybrid", bexp: "hybrid", variant: String(p.threadsPerRank || 1) };
   return { bexp: "imbalance", variant: p.sched };
 }
 
@@ -684,5 +691,122 @@ export const Measured: Record<string, (p: any, data: RunnerData) => ExperimentRe
         { k: "Fastest (meas.)", v: fmt(tbest, 3) + " ms", tone: "accent" },
       ],
     } as ExperimentResult;
+  },
+  numaEffects(params, data) {
+    return buildResult("numaEffects", params, tLookup(data), (cur, sw) => {
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      return {
+        peak,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: params.numaAware ? "good" : cur.x > 12 ? "bad" : "warn" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "NUMA policy", v: params.numaAware ? "first-touch (local)" : "serial init (remote)", tone: params.numaAware ? "good" : "bad" },
+          { k: "Peak speedup", v: fmt(peak.speedup, 1) + "× @ " + peak.x + "t", tone: "accent" },
+        ],
+      };
+    }, "measured");
+  },
+  cacheHierarchy(params, data) {
+    return buildResult("cacheHierarchy", params, tLookup(data), (cur, sw) => {
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      const level = params.level || "DRAM";
+      return {
+        peak,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: level === "L1" || level === "L2" ? "good" : "warn" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Memory level", v: level, tone: level === "L1" ? "good" : level === "L2" ? "good" : level === "L3" ? "warn" : "bad" },
+          { k: "Peak speedup", v: fmt(peak.speedup, 1) + "× @ " + peak.x + "t", tone: "accent" },
+        ],
+      };
+    }, "measured");
+  },
+  simdVec(params, data) {
+    return buildResult("simdVec", params, tLookup(data), (cur, sw) => {
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      const layout = params.layout || "SoA";
+      return {
+        peak,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: layout === "SoA" ? "good" : "bad" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Layout", v: layout, tone: layout === "SoA" ? "good" : "bad" },
+          { k: "Peak speedup", v: fmt(peak.speedup, 1) + "× @ " + peak.x + "t", tone: "accent" },
+        ],
+      };
+    }, "measured");
+  },
+  openmpTasks(params, data) {
+    return buildResult("openmpTasks", params, tLookup(data), (cur, sw) => {
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      const gran = params.granularity || "coarse";
+      return {
+        peak,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: gran === "coarse" ? "good" : cur.x > 8 ? "bad" : "warn" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Granularity", v: gran, tone: gran === "coarse" ? "good" : "bad" },
+          { k: "Peak speedup", v: fmt(peak.speedup, 1) + "× @ " + peak.x + "t", tone: "accent" },
+        ],
+      };
+    }, "measured");
+  },
+  cudaSharedMem(params, data) {
+    const meta = data as RunnerData & { sm?: string };
+    const pts = data.points;
+    const peakBW = Math.max(...pts.map((p) => p.gbps ?? 0)) || 1;
+    const sweep: SweepPoint[] = pts.map((pt) => ({
+      x: pt.p, time: pt.ms, speedup: (pt.gbps ?? 0) / peakBW, efficiency: (pt.gbps ?? 0) / peakBW,
+    }));
+    const cur = sweep.find((s) => s.x === params.bankStride) || sweep[0];
+    const curPt = pts[sweep.indexOf(cur)] ?? pts[0];
+    const bw = curPt.gbps ?? 0, eff = cur.efficiency;
+    return {
+      experimentId: "cudaSharedMem", source: "measured", referenceMachine: REF.id, params,
+      sweep, current: cur, xLabel: "shared memory access stride in banks", bw, util: eff, smName: meta.sm,
+      metrics: [
+        { k: "Bank stride", v: cur.x + (cur.x === 1 || params.padding ? " (conflict-free)" : "-way conflict"), tone: cur.x === 1 || params.padding ? "good" : cur.x <= 4 ? "warn" : "bad" },
+        { k: "SM shared BW", v: fmt(bw, 0) + " GB/s", tone: eff > 0.6 ? "good" : eff > 0.3 ? "warn" : "bad" },
+        { k: "BW efficiency", v: fmt(eff * 100, 0) + "%", tone: eff > 0.6 ? "good" : eff > 0.3 ? "warn" : "bad" },
+        { k: "Peak (meas.)", v: fmt(peakBW, 0) + " GB/s", tone: "accent" },
+        { k: "Padding", v: params.padding ? "ACTIVE" : "off", tone: params.padding ? "good" : "bad" },
+      ],
+    } as ExperimentResult;
+  },
+  mpiCollective(params, data) {
+    return buildResult("mpiCollective", params, tLookup(data), (cur, sw) => {
+      const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
+      const cc = cur.time - (sw[0]?.time ?? cur.time) / cur.x;
+      const commPct = cur.time > 0 ? Math.max(0, (cc / cur.time) * 100) : 0;
+      return {
+        peak,
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: "warn" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Collective", v: String(params.collective), tone: params.collective === "alltoall" ? "bad" : "good" },
+          { k: "Comm overhead", v: fmt(commPct, 0) + "%", tone: commPct < 15 ? "good" : commPct < 40 ? "warn" : "bad" },
+        ],
+      };
+    }, "measured", { xUnits: "ranks" });
+  },
+  hybridMpi(params, data) {
+    const tpr = params.threadsPerRank || 1;
+    return buildResult("hybridMpi", params, tLookup(data), (cur) => {
+      const tc = Math.min(24, cur.x * tpr);
+      return {
+        metrics: [
+          { k: "Wall time", v: fmt(cur.time, 0) + " ms", tone: cur.efficiency > 0.65 ? "good" : "warn" },
+          { k: "Speedup", v: fmt(cur.speedup, 1) + "×", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Efficiency", v: fmt(cur.efficiency * 100, 0) + "%", tone: cur.efficiency > 0.7 ? "good" : cur.efficiency > 0.4 ? "warn" : "bad" },
+          { k: "Total cores", v: String(tc), tone: tc >= 20 ? "good" : "warn" },
+          { k: "Threads/rank", v: String(tpr), tone: tpr >= 4 ? "good" : "warn" },
+        ],
+      };
+    }, "measured", { xUnits: "ranks" });
   },
 };

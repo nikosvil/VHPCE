@@ -63,7 +63,8 @@ class CodeJob(BaseModel):
 
 class MpiJob(BaseModel):
     kind: Literal["mpi"]
-    variant: str               # "strong" | "weak"
+    experiment: str = "halo"   # "halo" | "collective" | "hybrid"
+    variant: str = "strong"    # halo: "strong"|"weak"; collective: "broadcast"|...; hybrid: "1"|"4"|"12"
     maxranks: int = 24
 
 
@@ -90,14 +91,25 @@ async def submit(job: JobSubmit):
         j = await redis.enqueue_job("run_bench_task", job.exp, job.variant, maxt)
         return {"id": j.job_id, "status": "queued"}
     if job.kind == "mpi":
-        if job.variant not in settings.ALLOWED_MPI:
+        mpi_exp = getattr(job, "experiment", "halo")
+        if mpi_exp == "halo":
+            allowed = settings.ALLOWED_MPI
+        elif mpi_exp == "collective":
+            allowed = settings.ALLOWED_MPI_COLL
+        elif mpi_exp == "hybrid":
+            allowed = settings.ALLOWED_MPI_HYBRID
+        else:
+            allowed = set()
+        if job.variant not in allowed:
             return {"id": None, "status": "error",
-                    "result": {"error": "badrequest", "message": f"unknown mpi variant: {job.variant}"}}
+                    "result": {"error": "badrequest", "message": f"unknown mpi {mpi_exp}/{job.variant}"}}
         maxr = max(1, min(int(job.maxranks), 64))
-        cached = await redis.get(f"mpi:{job.variant}:{maxr}")
+        cache_key = f"mpi:{mpi_exp}:{job.variant}:{maxr}"
+        cached = await redis.get(cache_key)
         if cached:
             return {"id": None, "status": "done", "result": json.loads(cached), "cached": True}
-        j = await redis.enqueue_job("run_mpi_task", job.variant, maxr)
+        j = await redis.enqueue_job("run_mpi_task", job.variant, maxr, _job_id_prefix=f"mpi-{mpi_exp}",
+                                    mpi_experiment=mpi_exp)
         return {"id": j.job_id, "status": "queued"}
     if job.kind == "cuda":
         if job.experiment not in settings.ALLOWED_CUDA_EXP:

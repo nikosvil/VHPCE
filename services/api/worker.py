@@ -72,11 +72,23 @@ async def run_bench_task(ctx, exp, variant, maxt):
     return data
 
 
-async def run_mpi_task(ctx, variant, maxranks):
-    """MPI halo-exchange rank sweep: `docker run vhpce-mpi <variant> <maxranks> <Nbase> <iters>`.
+async def run_mpi_task(ctx, variant, maxranks, *, mpi_experiment="halo"):
+    """MPI experiments: halo exchange, collective benchmarking, or hybrid MPI+OMP.
     Single node, shared-memory transport — no network needed."""
-    if variant not in settings.ALLOWED_MPI:
-        return {"error": "badrequest", "message": f"unknown mpi variant: {variant}"}
+    if mpi_experiment == "halo":
+        if variant not in settings.ALLOWED_MPI:
+            return {"error": "badrequest", "message": f"unknown mpi variant: {variant}"}
+        args = [variant, str(maxranks), str(settings.HALO_NBASE), str(settings.HALO_ITERS)]
+    elif mpi_experiment == "collective":
+        if variant not in settings.ALLOWED_MPI_COLL:
+            return {"error": "badrequest", "message": f"unknown collective: {variant}"}
+        args = ["collective", str(maxranks), variant]
+    elif mpi_experiment == "hybrid":
+        if variant not in settings.ALLOWED_MPI_HYBRID:
+            return {"error": "badrequest", "message": f"unknown hybrid tpr: {variant}"}
+        args = ["hybrid", str(maxranks), variant]
+    else:
+        return {"error": "badrequest", "message": f"unknown mpi experiment: {mpi_experiment}"}
     maxranks = max(1, min(int(maxranks), 64))
     cmd = [
         "docker", "run", "--rm",
@@ -87,8 +99,7 @@ async def run_mpi_task(ctx, variant, maxranks):
         "--pids-limit", "256",
         "--read-only", "--tmpfs", "/tmp:rw,exec,size=256m",
         settings.MPI_IMAGE,
-        variant, str(maxranks), str(settings.HALO_NBASE), str(settings.HALO_ITERS),
-    ]
+    ] + args
     try:
         rc, out, err = await _run(cmd, timeout=settings.MPI_RUN_TIMEOUT)
     except RuntimeError as e:
@@ -103,7 +114,8 @@ async def run_mpi_task(ctx, variant, maxranks):
         data["source"] = "measured"
         data["cores"] = os.cpu_count()
         data["machine"] = "docker-local"
-        await ctx["redis"].set(f"mpi:{variant}:{maxranks}", json.dumps(data), ex=settings.BENCH_CACHE_TTL)
+        cache_key = f"mpi:{mpi_experiment}:{variant}:{maxranks}"
+        await ctx["redis"].set(cache_key, json.dumps(data), ex=settings.BENCH_CACHE_TTL)
     return data
 
 

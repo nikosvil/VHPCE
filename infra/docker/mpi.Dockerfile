@@ -3,8 +3,8 @@
 #   docker build -t vhpce-mpi -f infra/docker/mpi.Dockerfile .
 # Run (single node; ranks oversubscribe the 24 cores past k=24, capped at 24 here):
 #   docker run --rm --network none --cap-drop ALL --read-only --tmpfs /tmp:rw,exec \
-#     vhpce-mpi <strong|weak> <maxranks> <Nbase> <iters>
-# Emits {"exp":"mpi","variant":..,"points":[{"p":k,"ms":..}, ...]} — the RunnerData shape.
+#     vhpce-mpi <strong|weak|collective|hybrid> <maxranks> ...
+# Emits {"exp":"mpi"|"collective"|"hybrid","variant":..,"points":[{"p":k,"ms":..}, ...]} — the RunnerData shape.
 FROM ubuntu:24.04
 
 RUN apt-get update \
@@ -12,7 +12,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY services/runner/experiments/halo.c /tmp/halo.c
-RUN mpicc -O2 -o /usr/local/bin/halo /tmp/halo.c && rm /tmp/halo.c
+RUN mpicc -O2 -fopenmp -lm -o /usr/local/bin/halo /tmp/halo.c && rm /tmp/halo.c
 
 COPY infra/docker/mpi-driver.sh /usr/local/bin/mpi-driver.sh
 RUN chmod +x /usr/local/bin/mpi-driver.sh

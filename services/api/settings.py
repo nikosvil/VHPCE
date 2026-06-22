@@ -31,14 +31,20 @@ HALO_ITERS = 30
 
 # Allow-list: frontend exp id -> {allowed bench variants}  (ported from services/runner/server.py).
 ALLOWED = {
-    "falsesharing": {"shared", "padded"},
-    "sync":         {"critical", "atomic", "reduction"},
-    "bandwidth":    {"triad"},
-    "imbalance":    {"static", "guided", "dynamic"},
+    "falsesharing":   {"shared", "padded"},
+    "sync":           {"critical", "atomic", "reduction"},
+    "bandwidth":      {"triad"},
+    "imbalance":      {"static", "guided", "dynamic"},
+    "numaeffects":    {"aware", "unaware"},
+    "cachehierarchy": {"L1", "L2", "L3", "DRAM"},
+    "simdvec":        {"SoA", "AoS"},
+    "tasks":          {"coarse", "fine"},
 }
-# MPI halo experiment: the two scaling regimes.
+# MPI experiments: halo scaling + collective benchmarking + hybrid MPI+OMP.
 ALLOWED_MPI = {"strong", "weak"}
+ALLOWED_MPI_COLL = {"broadcast", "reduce", "allreduce", "alltoall"}
+ALLOWED_MPI_HYBRID = {"1", "4", "12"}
 # GPU occupancy experiment: the two register-pressure profiles.
 ALLOWED_CUDA = {"light", "heavy"}
 # GPU experiments the vhpce-cuda image dispatches on.
-ALLOWED_CUDA_EXP = {"occupancy", "coalesce", "divergence", "atomics"}
+ALLOWED_CUDA_EXP = {"occupancy", "coalesce", "divergence", "atomics", "sharedmem"}

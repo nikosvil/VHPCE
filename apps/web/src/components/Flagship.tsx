@@ -74,9 +74,7 @@ type ExpParams = {
 };
 
 // Experiments that have no Measured backend — Measured pill is disabled for these.
-const MODEL_ONLY = new Set<ExpId>([
-  "numaEffects", "cacheHierarchy", "simdVec", "openmpTasks", "cudaSharedMem", "mpiCollective", "hybridMpi",
-]);
+const MODEL_ONLY = new Set<ExpId>([]);
 
 const DEFAULT_PARAMS: Record<ExpId, ExpParams> = {
   falseSharing:   { threads: 24, padded: false, intensity: 1 },
@@ -171,23 +169,27 @@ export default function Flagship() {
     const isCoalesce = exp === "cudaCoalesce";
     const isDiverge = exp === "cudaDivergence";
     const isAtomics = exp === "cudaAtomics";
-    const cudaExp = isDiverge ? "divergence" : isCoalesce ? "coalesce" : isAtomics ? "atomics" : "occupancy";
-    const { bexp, variant } = runnerSpec(exp, cp);
-    // The CUDA runner sweeps the whole range in one pass, so the sweep experiments cache by
-    // experiment only — moving the slider just re-selects a point from the same measured data.
-    const key = isDiverge ? "cuda/divergence"
-      : isCoalesce ? "cuda/coalesce"
-      : isAtomics ? "cuda/atomics"
-      : isCuda ? "cuda/" + (cp.variant ?? "")
-      : isMpi ? "mpi/" + (cp.mode ?? "")
-      : bexp + "/" + variant;
+    const isCudaShared = exp === "cudaSharedMem";
+    const isMpiColl = exp === "mpiCollective";
+    const isHybrid = exp === "hybridMpi";
+    const cudaExp = isDiverge ? "divergence" : isCoalesce ? "coalesce" : isAtomics ? "atomics"
+      : isCudaShared ? "sharedmem" : "occupancy";
+    const spec = runnerSpec(exp, cp);
+    const { bexp, variant } = spec;
+    const key = (spec.kind === "cuda" || isCuda || isCoalesce || isDiverge || isAtomics)
+      ? "cuda/" + cudaExp + "/" + variant
+      : (spec.kind === "mpi" || isMpi)
+        ? "mpi/" + (spec.experiment ?? "halo") + "/" + variant
+        : bexp + "/" + variant;
     const cached = cacheRef.current[key];
     if (cached) { setMeasuredResult(Measured[exp](cp, cached)); return; }
     setLoading(true);
-    const body = isCuda || isCoalesce || isDiverge || isAtomics
-      ? { kind: "cuda" as const, experiment: cudaExp, variant: cp.variant ?? "heavy" }
-      : isMpi
-        ? { kind: "mpi" as const, variant: cp.mode ?? "strong", maxranks: MAXP }
+    const anyCuda = isCuda || isCoalesce || isDiverge || isAtomics || isCudaShared;
+    const anyMpi = isMpi || isMpiColl || isHybrid;
+    const body = anyCuda
+      ? { kind: "cuda" as const, experiment: cudaExp, variant: variant }
+      : anyMpi
+        ? { kind: "mpi" as const, experiment: spec.experiment ?? "halo", variant, maxranks: MAXP }
         : { kind: "bench" as const, exp: bexp, variant, maxthreads: MAXP };
     runJob(body)
       .then((data) => {

@@ -1,11 +1,16 @@
 /* VHPCE benchmark harness — real OpenMP kernels for the flagship experiments.
  *
  * Usage:   ./bench <exp> <variant> <maxthreads>
- *   exp:      falsesharing | sync | bandwidth | imbalance
- *   variant:  falsesharing -> shared | padded
- *             sync         -> critical | atomic | reduction
- *             bandwidth    -> triad
- *             imbalance    -> static | guided | dynamic
+ *   exp:      falsesharing | sync | bandwidth | imbalance |
+ *             numaeffects | cachehierarchy | simdvec | tasks
+ *   variant:  falsesharing   -> shared | padded
+ *             sync           -> critical | atomic | reduction
+ *             bandwidth      -> triad
+ *             imbalance      -> static | guided | dynamic
+ *             numaeffects    -> aware | unaware
+ *             cachehierarchy -> L1 | L2 | L3 | DRAM
+ *             simdvec        -> SoA | AoS
+ *             tasks          -> coarse | fine
  *
  * Emits one JSON object on stdout:
  *   {"exp":..,"variant":..,"points":[{"p":1,"ms":..[,"gbps":..,"gflops":..]}, ...]}
@@ -124,6 +129,152 @@ static double run_imbalance(int p, const char *sched) {
     return (t1 - t0) * 1000.0;
 }
 
+/* ----------------------------- NUMA effects ----------------------------- */
+/* "aware": each thread first-touches its own portion (data lands in local cache).
+ * "unaware": thread 0 touches everything, then all threads access -> remote misses. */
+static double run_numa(int p, int aware) {
+    const long N = 64L * 1024 * 1024 / (long)sizeof(double); /* 64 MB */
+    const int PASSES = 50;
+    double *arr = (double *)malloc(N * sizeof(double));
+    if (!arr) { fprintf(stderr, "malloc failed in run_numa\n"); return -1; }
+
+    if (aware) {
+        /* parallel first-touch: each thread inits its own portion */
+        #pragma omp parallel for num_threads(p) schedule(static)
+        for (long i = 0; i < N; i++) arr[i] = 1.0;
+    } else {
+        /* serial init: thread 0 touches everything */
+        for (long i = 0; i < N; i++) arr[i] = 1.0;
+    }
+
+    volatile double sink = 0.0;
+    double t0 = omp_get_wtime();
+    for (int pass = 0; pass < PASSES; pass++) {
+        double local_sum = 0.0;
+        #pragma omp parallel for num_threads(p) schedule(static) reduction(+:local_sum)
+        for (long i = 0; i < N; i++) local_sum += arr[i];
+        sink = local_sum;
+    }
+    double t1 = omp_get_wtime();
+    (void)sink;
+    free(arr);
+    return (t1 - t0) * 1000.0;
+}
+
+/* --------------------------- Cache hierarchy ---------------------------- */
+/* Vary working-set size to target L1 / L2 / L3 / DRAM bandwidth. */
+static double run_cache(int p, const char *level) {
+    long per_thread;
+    int reps;
+    if      (strcmp(level, "L1")   == 0) { per_thread = 8L   * 1024 / (long)sizeof(double); reps = 50000; }
+    else if (strcmp(level, "L2")   == 0) { per_thread = 64L  * 1024 / (long)sizeof(double); reps = 6000;  }
+    else if (strcmp(level, "L3")   == 0) { per_thread = 1L   * 1024 * 1024 / (long)sizeof(double); reps = 400; }
+    else /* DRAM */                      { per_thread = 16L  * 1024 * 1024 / (long)sizeof(double); reps = 20;  }
+
+    long N = per_thread * p;
+    double *arr = (double *)malloc(N * sizeof(double));
+    if (!arr) { fprintf(stderr, "malloc failed in run_cache\n"); return -1; }
+    for (long i = 0; i < N; i++) arr[i] = 1.0;
+
+    volatile double sink = 0.0;
+    double t0 = omp_get_wtime();
+    for (int r = 0; r < reps; r++) {
+        double local_sum = 0.0;
+        #pragma omp parallel for num_threads(p) schedule(static) reduction(+:local_sum)
+        for (long i = 0; i < N; i++) local_sum += arr[i];
+        sink = local_sum;
+    }
+    double t1 = omp_get_wtime();
+    (void)sink;
+    free(arr);
+    return (t1 - t0) * 1000.0;
+}
+
+/* ----------------------------- SIMD / vec ------------------------------- */
+/* AoS vs SoA data layout: SoA enables contiguous SIMD loads, AoS forces gathers. */
+typedef struct { float x, y, z, w; } AoS4;
+
+static double run_simd(int p, int soa) {
+    const long N = 4L * 1024 * 1024;   /* 4M elements */
+    const int PASSES = 20;
+
+    if (soa) {
+        float *bx = (float *)malloc(N * sizeof(float));
+        float *cx = (float *)malloc(N * sizeof(float));
+        float *dx = (float *)malloc(N * sizeof(float));
+        float *ax = (float *)malloc(N * sizeof(float));
+        if (!bx || !cx || !dx || !ax) { fprintf(stderr, "malloc failed in run_simd SoA\n"); return -1; }
+        for (long i = 0; i < N; i++) { bx[i] = 1.0f; cx[i] = 2.0f; dx[i] = 3.0f; ax[i] = 0.0f; }
+
+        double t0 = omp_get_wtime();
+        for (int pass = 0; pass < PASSES; pass++) {
+            #pragma omp parallel for num_threads(p) schedule(static)
+            for (long i = 0; i < N; i++) ax[i] = bx[i] * cx[i] + dx[i];
+        }
+        double t1 = omp_get_wtime();
+        volatile float sink = ax[N - 1]; (void)sink;
+        free(bx); free(cx); free(dx); free(ax);
+        return (t1 - t0) * 1000.0;
+    } else {
+        AoS4 *src1 = (AoS4 *)malloc(N * sizeof(AoS4));
+        AoS4 *src2 = (AoS4 *)malloc(N * sizeof(AoS4));
+        AoS4 *src3 = (AoS4 *)malloc(N * sizeof(AoS4));
+        AoS4 *dst  = (AoS4 *)malloc(N * sizeof(AoS4));
+        if (!src1 || !src2 || !src3 || !dst) { fprintf(stderr, "malloc failed in run_simd AoS\n"); return -1; }
+        for (long i = 0; i < N; i++) {
+            src1[i].x = 1.0f; src1[i].y = 1.0f; src1[i].z = 1.0f; src1[i].w = 1.0f;
+            src2[i].x = 2.0f; src2[i].y = 2.0f; src2[i].z = 2.0f; src2[i].w = 2.0f;
+            src3[i].x = 3.0f; src3[i].y = 3.0f; src3[i].z = 3.0f; src3[i].w = 3.0f;
+            dst[i].x  = 0.0f; dst[i].y  = 0.0f; dst[i].z  = 0.0f; dst[i].w  = 0.0f;
+        }
+
+        double t0 = omp_get_wtime();
+        for (int pass = 0; pass < PASSES; pass++) {
+            #pragma omp parallel for num_threads(p) schedule(static)
+            for (long i = 0; i < N; i++) {
+                dst[i].x = src1[i].x * src2[i].x + src3[i].x;
+                dst[i].y = src1[i].y * src2[i].y + src3[i].y;
+                dst[i].z = src1[i].z * src2[i].z + src3[i].z;
+                dst[i].w = src1[i].w * src2[i].w + src3[i].w;
+            }
+        }
+        double t1 = omp_get_wtime();
+        volatile float sink = dst[N - 1].w; (void)sink;
+        free(src1); free(src2); free(src3); free(dst);
+        return (t1 - t0) * 1000.0;
+    }
+}
+
+/* -------------------------------- Tasks --------------------------------- */
+/* coarse: p tasks each doing TOTAL/p work  — minimal overhead.
+ * fine:   10000 small tasks               — task queue contention at scale. */
+static double run_tasks(int p, int fine) {
+    const long TOTAL = 200000000L;
+    int num_tasks = fine ? 10000 : p;
+    long work_per = TOTAL / num_tasks;
+    volatile long result = 0;
+
+    double t0 = omp_get_wtime();
+    #pragma omp parallel num_threads(p)
+    {
+        #pragma omp single
+        {
+            for (int t = 0; t < num_tasks; t++) {
+                #pragma omp task firstprivate(work_per)
+                {
+                    long local = 0;
+                    for (long i = 0; i < work_per; i++) local++;
+                    #pragma omp atomic
+                    result += local;
+                }
+            }
+        }
+    }
+    double t1 = omp_get_wtime();
+    volatile long sink = result; (void)sink;
+    return (t1 - t0) * 1000.0;
+}
+
 /* --------------------------------- main --------------------------------- */
 int main(int argc, char **argv) {
     if (argc < 4) { fprintf(stderr, "usage: bench <exp> <variant> <maxthreads>\n"); return 2; }
@@ -142,6 +293,10 @@ int main(int argc, char **argv) {
             else if (strcmp(exp, "sync") == 0)         ms = run_sync(p, variant);
             else if (is_bw)                            ms = run_bw(p, &g, &f);
             else if (strcmp(exp, "imbalance") == 0)    ms = run_imbalance(p, variant);
+            else if (strcmp(exp, "numaeffects") == 0)  ms = run_numa(p, strcmp(variant, "aware") == 0);
+            else if (strcmp(exp, "cachehierarchy") == 0) ms = run_cache(p, variant);
+            else if (strcmp(exp, "simdvec") == 0)      ms = run_simd(p, strcmp(variant, "SoA") == 0);
+            else if (strcmp(exp, "tasks") == 0)         ms = run_tasks(p, strcmp(variant, "fine") == 0);
             else { fprintf(stderr, "unknown exp: %s\n", exp); return 2; }
             if (ms < best) { best = ms; gbps = g; gflops = f; }
         }

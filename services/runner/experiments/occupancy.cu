@@ -1,15 +1,18 @@
-/* VHPCE GPU experiments for the flagship — one program, three lessons (dispatch on argv[1]):
+/* VHPCE GPU experiments for the flagship — one program, five lessons (dispatch on argv[1]):
  *   occupancy   : register pressure caps warps/SM (light vs heavy). argv[2] = light|heavy.
  *   coalesce    : strided global access wastes memory bandwidth (stride sweep 1..32).
  *   divergence  : divergent branches within a warp serialize execution (paths sweep 1..32).
  *   atomics     : global-atomic contention — many threads hammering few counters serialize;
  *                 spreading the updates across more targets recovers throughput (targets 1..4096).
+ *   sharedmem   : shared-memory bank conflicts — stride-way access patterns collide on banks;
+ *                 padding the shared array ([32][33] vs [32][32]) eliminates conflicts.
+ *                 argv[2] = padded|unpadded.
  *
  * Each emits one JSON object on stdout matching the RunnerData seam:
  *   {"exp":..,"variant":..,"points":[{"p":<x>,"ms":..[,"occ"|"gbps"|...]}], "sm":..,"cc":..}
  *
  * Build: nvcc -O2 -arch=sm_120 occupancy.cu -o occupancy   (PTX-JIT fallback: compute_90)
- * Run:   occupancy <occupancy|coalesce|divergence|atomics> [variant]
+ * Run:   occupancy <occupancy|coalesce|divergence|atomics|sharedmem> [variant]
  */
 #include <cstdio>
 #include <cstring>
@@ -178,6 +181,64 @@ static void run_atomics(const cudaDeviceProp &prop) {
     cudaFree(dc); cudaEventDestroy(t0); cudaEventDestroy(t1);
 }
 
+/* ----- shared-memory bank-conflict kernel: each warp reads/writes shared memory at
+ *       the given stride. Without padding, stride-way bank conflicts serialize accesses;
+ *       with padding (width 33 instead of 32), every stride maps to a distinct bank
+ *       and conflicts disappear -> bandwidth recovers. ----- */
+__global__ void shmem_bank_kernel(float *out, int stride, int padded) {
+    extern __shared__ float smem[];
+    int tid = threadIdx.x;
+    int lane = tid & 31;
+    float sum = 0.0f;
+
+    int idx = padded ? (lane * stride + lane * stride / 32) : (lane * stride);
+    for (int rep = 0; rep < 1000; rep++) {
+        smem[idx % (32 * 33)] = (float)lane;
+        __syncthreads();
+        sum += smem[idx % (32 * 33)];
+        __syncthreads();
+    }
+    if (tid == 0) out[blockIdx.x] = sum; /* prevent optimization */
+}
+
+static void run_sharedmem(const cudaDeviceProp &prop, int padded) {
+    const int B = 256, NBLOCKS = 256;
+    float *dout = nullptr;
+    cudaMalloc(&dout, (size_t)NBLOCKS * sizeof(float));
+
+    size_t smem_sz = 32 * 33 * sizeof(float); /* enough for padded layout */
+    cudaEvent_t t0, t1; cudaEventCreate(&t0); cudaEventCreate(&t1);
+
+    const char *variant = padded ? "padded" : "unpadded";
+    printf("{\"exp\":\"cuda-sharedmem\",\"variant\":\"%s\",\"points\":[", variant);
+    int first = 1;
+    for (int s = 0; s < 6; s++) {
+        int stride = SWEEP6[s];
+        /* warm-up */
+        shmem_bank_kernel<<<NBLOCKS, B, smem_sz>>>(dout, stride, padded);
+        cudaDeviceSynchronize();
+        float best = 1e30f;
+        for (int r = 0; r < REPS; r++) {
+            cudaEventRecord(t0);
+            shmem_bank_kernel<<<NBLOCKS, B, smem_sz>>>(dout, stride, padded);
+            cudaEventRecord(t1);
+            cudaEventSynchronize(t1);
+            float ms = 0.f;
+            cudaEventElapsedTime(&ms, t0, t1);
+            if (ms < best) best = ms;
+        }
+        if (cudaGetLastError() != cudaSuccess) continue;
+        /* Effective bandwidth: each thread does 1000 reps of 1 write + 1 read (8 bytes per rep).
+         * Total bytes = NBLOCKS * B * 1000 * 8. */
+        double bytes = (double)NBLOCKS * (double)B * 1000.0 * 8.0;
+        double gbps = bytes / (best * 1.0e-3) / 1.0e9;
+        printf("%s{\"p\":%d,\"ms\":%.4f,\"gbps\":%.2f}", first ? "" : ",", stride, best, gbps);
+        first = 0; fflush(stdout);
+    }
+    printf("],\"sm\":\"%s\",\"cc\":\"%d.%d\"}\n", prop.name, prop.major, prop.minor);
+    cudaFree(dout); cudaEventDestroy(t0); cudaEventDestroy(t1);
+}
+
 int main(int argc, char **argv) {
     const char *experiment = (argc > 1) ? argv[1] : "occupancy";
     const char *variant = (argc > 2) ? argv[2] : "heavy";
@@ -188,6 +249,7 @@ int main(int argc, char **argv) {
     if (strcmp(experiment, "coalesce") == 0) run_coalesce(prop);
     else if (strcmp(experiment, "divergence") == 0) run_divergence(prop);
     else if (strcmp(experiment, "atomics") == 0) run_atomics(prop);
+    else if (strcmp(experiment, "sharedmem") == 0) run_sharedmem(prop, strcmp(variant, "padded") == 0);
     else run_occupancy(prop, variant);
     return 0;
 }
