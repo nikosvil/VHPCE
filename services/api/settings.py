@@ -43,7 +43,7 @@ ALLOWED = {
 # MPI experiments: halo scaling + collective benchmarking + hybrid MPI+OMP.
 ALLOWED_MPI = {"strong", "weak"}
 ALLOWED_MPI_COLL = {"broadcast", "reduce", "allreduce", "alltoall"}
-ALLOWED_MPI_HYBRID = {"1", "4", "12"}
+ALLOWED_MPI_HYBRID = {"1", "2", "4", "6", "12"}
 # GPU occupancy experiment: the two register-pressure profiles.
 ALLOWED_CUDA = {"light", "heavy"}
 # GPU experiments the vhpce-cuda image dispatches on.
