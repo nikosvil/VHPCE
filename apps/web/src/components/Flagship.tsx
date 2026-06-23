@@ -256,7 +256,7 @@ export default function Flagship() {
     const draw = (now: number) => {
       ctx.clearRect(0, 0, w, h);
       const r = resultRef.current;
-      if (r) { const fn = scenes[r.experimentId]; if (fn) fn(ctx, w, h, now, r); }
+      if (r) { const fn = scenes[r.experimentId]; if (fn) fn(ctx, w, h, now * 0.35, r); }
     };
     resize();
     window.addEventListener("resize", resize);
