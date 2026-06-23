@@ -72,7 +72,7 @@ async def run_bench_task(ctx, exp, variant, maxt):
     return data
 
 
-async def run_mpi_task(ctx, variant, maxranks, *, mpi_experiment="halo"):
+async def run_mpi_task(ctx, variant, maxranks, mpi_experiment="halo"):
     """MPI experiments: halo exchange, collective benchmarking, or hybrid MPI+OMP.
     Single node, shared-memory transport — no network needed."""
     if mpi_experiment == "halo":

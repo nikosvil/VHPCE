@@ -108,8 +108,7 @@ async def submit(job: JobSubmit):
         cached = await redis.get(cache_key)
         if cached:
             return {"id": None, "status": "done", "result": json.loads(cached), "cached": True}
-        j = await redis.enqueue_job("run_mpi_task", job.variant, maxr, _job_id_prefix=f"mpi-{mpi_exp}",
-                                    mpi_experiment=mpi_exp)
+        j = await redis.enqueue_job("run_mpi_task", job.variant, maxr, mpi_exp)
         return {"id": j.job_id, "status": "queued"}
     if job.kind == "cuda":
         if job.experiment not in settings.ALLOWED_CUDA_EXP:
