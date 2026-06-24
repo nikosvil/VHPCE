@@ -114,6 +114,7 @@ export default function Playground() {
   const [source, setSource] = useState(STARTER);
   const [activeEx, setActiveEx] = useState<Example | null>(EXAMPLES[0]);
   const [predict, setPredict] = useState<string | null>(null);
+  const [justification, setJustification] = useState("");
   const [focus, setFocus] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<Phase | null>(null);
@@ -226,6 +227,17 @@ export default function Playground() {
                 <button key={b.id} className={predict === b.id ? "on" : ""} onClick={() => setPredict(b.id)}>{b.label}</button>
               ))}
             </div>
+            {predict && (
+              <div className="pg-justify">
+                <label>Why? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional — deepens learning)</span></label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. &quot;There's a critical section in the hot loop — I expect Amdahl to cap it&quot;"
+                  value={justification}
+                  onChange={(e) => setJustification(e.target.value)}
+                />
+              </div>
+            )}
           </div>
           <div className="pg-runrow">
             <button className="pg-run" disabled={!canRun} onClick={run}>

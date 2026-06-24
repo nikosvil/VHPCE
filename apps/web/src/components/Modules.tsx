@@ -8,6 +8,7 @@ import GemmLab from "./modules/GemmLab";
 import FFTLab from "./modules/FFTLab";
 import SpMVLab from "./modules/SpMVLab";
 import MultigridLab from "./modules/MultigridLab";
+import TopologyLab from "./modules/TopologyLab";
 
 const TABS = [
   { id: "wave",  label: "🌊 Wave (FDTD)" },
@@ -16,6 +17,7 @@ const TABS = [
   { id: "fft",   label: "📊 FFT" },
   { id: "spmv",  label: "🔗 Sparse SpMV" },
   { id: "mg",    label: "🔻 Multigrid" },
+  { id: "topo",  label: "🖥 Topology" },
 ];
 
 export default function Modules() {
@@ -42,6 +44,7 @@ export default function Modules() {
       {tab === "fft"   && <FFTLab />}
       {tab === "spmv"  && <SpMVLab />}
       {tab === "mg"    && <MultigridLab />}
+      {tab === "topo"  && <TopologyLab />}
     </main>
   );
 }

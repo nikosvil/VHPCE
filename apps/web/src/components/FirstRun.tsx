@@ -89,6 +89,7 @@ export default function FirstRun() {
   const [step, setStep] = useState(0);
   const [runnerOk, setRunnerOk] = useState(false);
   const [predict, setPredict] = useState<Record<number, string>>({});
+  const [justify, setJustify] = useState<Record<number, string>>({});
   const [results, setResults] = useState<Record<number, Res>>({});
   const [running, setRunning] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase | null>(null);
@@ -172,6 +173,17 @@ export default function FirstRun() {
                 <button key={b.id} className={predict[step] === b.id ? "on" : ""} onClick={() => setPredict((p) => ({ ...p, [step]: b.id }))}>{b.label}</button>
               ))}
             </div>
+            {predict[step] && (
+              <div className="pg-justify">
+                <label>Why do you think so? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional)</span></label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. &quot;Each thread does independent work, so I expect near-linear scaling&quot;"
+                  value={justify[step] || ""}
+                  onChange={(e) => setJustify((j) => ({ ...j, [step]: e.target.value }))}
+                />
+              </div>
+            )}
           </div>
           <div className="fr-runrow">
             <button className="pg-run" disabled={!runnerOk || isRunning} onClick={run}>

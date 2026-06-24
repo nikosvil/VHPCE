@@ -25,6 +25,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `All ${c.x} counters share <b>one 64-byte cache line</b>. Every increment invalidates that line in every other core, so it ping-pongs across cores over the bus — coherence traffic grows ~linearly with thread count and now dominates (${fmt(r.coh ?? 0, 0)} ms of the ${fmt(c.time, 0)} ms runtime).`,
       how: `<b>Pad/align each thread's counter to its own cache line</b> (64-byte alignment, or per-thread padded struct). Flip "Pad to cache line".`,
       exp: `Near-linear speedup restored (~${c.x}× at ${c.x} threads); coherence stall → ~0%.`,
+      secondary: [
+        { bottleneck: "bandwidth saturation", note: "Coherence traffic also saturates the memory bus — even padded code won't scale past the bus limit." },
+      ],
     };
   },
   synchronization(r) {
@@ -43,6 +46,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `The <b>${mode}</b> update serializes the hot loop: ${fmt(r.serialPct!, 0)}% of the work runs one-thread-at-a-time, and <b>Amdahl's law</b> caps speedup at 1 / serial-fraction = ${fmt(r.ceiling!, 1)}×. Threads also queue for the lock, adding contention.`,
       how: `Accumulate into <b>per-thread partials</b> and combine once at the end (reduction). Pick "reduction".`,
       exp: `Serial fraction → ~1%, speedup tracks the near-ideal reduction curve (~${c.x}× achievable).`,
+      secondary: [
+        { bottleneck: "cache contention", note: "The lock variable itself causes coherence traffic similar to false sharing." },
+      ],
     };
   },
   bandwidth(r) {
@@ -61,6 +67,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `The STREAM-triad is <b>memory-bound</b> (AI ${fmt(r.params.ai, 2)} FLOP/byte, below the ridge ${fmt(r.ridge!, 1)}). DRAM bandwidth is <b>${fmt(r.util! * 100, 0)}% saturated</b>; extra threads contend for the same bus instead of doing new work.`,
       how: `Don't add threads — <b>raise arithmetic intensity</b> (cache blocking, loop fusion) or cut memory traffic. Drag "Arithmetic intensity" right to move the operating point.`,
       exp: `The kernel's point on the roofline moves right toward the compute ceiling; >2× headroom unlocked.`,
+      secondary: [
+        { bottleneck: "NUMA effects", note: "On multi-socket systems, remote DRAM access compounds the bandwidth wall." },
+      ],
     };
   },
   imbalance(r) {
@@ -79,6 +88,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `The triangular loop with <b>${sched}</b> scheduling gives early threads little work and late threads a lot. Total time = the <b>slowest</b> thread (imbalance factor ${fmt(r.factor!, 2)}×), so finished cores sit idle waiting.`,
       how: `Use <b>schedule(dynamic)</b> or <b>guided</b> so idle threads grab remaining chunks.`,
       exp: `Imbalance factor → ~1.05, idle time → near 0, speedup approaches ${c.x}×.`,
+      secondary: [
+        { bottleneck: "synchronization", note: "The implicit barrier at the end of the parallel region forces all threads to wait for the slowest." },
+      ],
     };
   },
   mpiHalo(r) {
@@ -97,6 +109,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `The global grid is <b>fixed</b>, so per-rank compute shrinks (∝ 1/p) while the halo exchange stays roughly constant and its <b>latency grows ~log(p)</b>. Communication is now <b>${fmt(commPct, 0)}%</b> of the time — the comm wall.`,
       how: `Either <b>grow the problem with the machine</b> (switch to weak scaling) or cut communication — larger subdomains, fewer/aggregated messages, comm/compute overlap.`,
       exp: `Weak scaling holds efficiency near ideal; on a real multi-node cluster the strong-scaling wall is even sharper than on one shared-memory node.`,
+      secondary: [
+        { bottleneck: "load imbalance", note: "Non-uniform domain sizes at non-power-of-2 rank counts create residual imbalance." },
+      ],
     };
   },
   cuda(r) {
@@ -115,6 +130,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `Each thread needs ${r.regsPerThread} registers, so a ${B}-thread block claims a big slice of the SM's 64K register file. The SM runs out of registers before warp slots, leaving warps unscheduled — low occupancy and idle latency-hiding capacity. Bigger blocks make it worse.`,
       how: `<b>Cut register pressure</b> (fewer live variables, recompute instead of cache, <code>__launch_bounds__</code> to cap regs) or pick the occupancy sweet-spot block size (~${r.optimalBlock}).`,
       exp: `Reducing registers (flip to <b>light</b>) lifts occupancy toward 100% — more warps per SM, better latency hiding.`,
+      secondary: [
+        { bottleneck: "memory latency", note: "Low occupancy means fewer warps to switch to during memory stalls — the SM idles waiting for DRAM instead of hiding latency." },
+      ],
     };
   },
   cudaCoalesce(r) {
@@ -133,6 +151,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `A 128-byte line is the smallest unit DRAM delivers. When lanes are spread <code>stride</code> apart, most of each fetched line is unused but still paid for — bandwidth wasted scales with the stride.`,
       how: `<b>Make the inner index unit-stride.</b> Transpose the loop nest or store the array so the fast-varying dimension matches <code>threadIdx.x</code> (Struct-of-Arrays, not Array-of-Structs).`,
       exp: `Drop the stride back toward 1 and the achieved bandwidth climbs back to the coalesced peak.`,
+      secondary: [
+        { bottleneck: "L2 cache thrashing", note: "Strided access pollutes the L2 with unused portions of each cache line, evicting useful data and increasing DRAM round-trips." },
+      ],
     };
   },
   cudaDivergence(r) {
@@ -151,6 +172,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `All 32 lanes share one program counter. When lanes take different branches, the hardware masks off the inactive ones and replays the warp once per path — the idle lanes burn cycles doing nothing.`,
       how: `<b>Make branches warp-uniform.</b> Sort/bin data so a whole warp takes the same path, hoist the condition out of the warp, or replace small <code>if/else</code> with branchless arithmetic (<code>select</code>/predication).`,
       exp: `Collapse the paths back toward 1 and the warp re-converges — the serialized passes disappear and throughput recovers.`,
+      secondary: [
+        { bottleneck: "instruction cache pressure", note: "Highly divergent warps execute many code paths, increasing I-cache footprint and potentially causing I-cache misses on smaller SMs." },
+      ],
     };
   },
   cudaAtomics(r) {
@@ -162,6 +186,9 @@ export const Explain: Record<string, ExplainFn> = {
         why: `Atomics on one location must apply one-at-a-time to stay correct. With thousands of threads funneled through a single address, the hardware queues them — throughput collapses to that one unit's rate.`,
         how: `<b>Privatize the updates.</b> Accumulate into per-block <code>__shared__</code> counters (or many per-bin counters) and do just one global <code>atomicAdd</code> per block at the end — a hierarchical reduction.`,
         exp: `Spread the updates across more targets and the time falls steeply — until contention is gone and you hit the bandwidth/launch floor.`,
+        secondary: [
+          { bottleneck: "memory latency", note: "Serialized atomics stall warps waiting for the L2 atomic unit, reducing occupancy and preventing latency hiding." },
+        ],
       };
     return {
       sev: eff > 60 ? "info" : "warn",
@@ -198,6 +225,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `Threads 13–${c.x} were placed on socket 1 by the OS, but the memory (allocated on socket 0 via first-touch) is a <b>2.5× slower</b> remote DRAM hop away. Inter-socket QPI/Infinity Fabric traffic eats the scaling headroom.`,
       how: `<b>Pin threads to their local socket</b>: <code>OMP_PROC_BIND=close</code>, <code>numactl --cpunodebind=0 --membind=0</code>, or allocate data after forking threads (first-touch on the right socket).`,
       exp: `NUMA-aware binding eliminates the remote-access penalty — efficiency climbs back to the local curve.`,
+      secondary: [
+        { bottleneck: "bandwidth saturation", note: "Remote DRAM accesses share the inter-socket link, which has lower bandwidth than local memory — adding threads saturates it sooner." },
+      ],
     };
   },
 
@@ -219,6 +249,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `The working set lives in <b>${level}</b>, a ${level === "DRAM" ? "single shared DRAM bus" : "shared L3 ring"}. All threads compete for the same bandwidth; adding more cores doesn't help once that bus is full.`,
       how: `<b>Cache block / tile</b> the computation so the hot data fits in L1 or L2 — each core then has private bandwidth and the scaling curve returns to near-ideal.`,
       exp: `With L1 data, speedup climbs back toward linear — the same thread count, same bus, but each core now brings its own private bandwidth.`,
+      secondary: level === "DRAM"
+        ? [{ bottleneck: "NUMA effects", note: "On multi-socket systems, threads on the remote socket pay an extra latency penalty to reach DRAM on the other socket." }]
+        : [{ bottleneck: "bandwidth saturation", note: "The shared L3 ring has finite bandwidth — threads saturate it before the DRAM bus even becomes relevant." }],
     };
   },
 
@@ -239,6 +272,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `AoS interleaves fields: <code>{x,y,z,x,y,z,…}</code>. Loading the <code>x</code> values for ${W} elements requires a <b>gather</b> with stride equal to the struct size — lanes fetch from non-consecutive addresses and the gather overhead grows with width. At ${W} lanes, only ${fmt(eff * 100, 0)}% of the SIMD throughput is useful work.`,
       how: `<b>Transpose to Structure-of-Arrays</b>: store all <code>x</code> values together, all <code>y</code> values together, etc. The ${W}-wide load becomes a single unit-stride fetch — no gather, all lanes busy.`,
       exp: `With SoA, throughput rises from ${fmt(Math.sqrt(W), 1)}× to the full ${W}× — the vector unit pays for itself.`,
+      secondary: [
+        { bottleneck: "cache pollution", note: "Gather loads pull in full cache lines but use only one element from each — the unwanted fields evict useful data from L1." },
+      ],
     };
   },
 
@@ -259,6 +295,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `Thousands of tiny tasks flood the runtime task queue. At ${c.x} threads, workers spend <b>${fmt(ovhPct, 1)}%</b> of their time creating tasks, stealing work, and synchronising the queue — the actual computation is a small fraction.`,
       how: `<b>Merge tasks into coarser chunks</b>: increase the minimum task size so each task does enough work to pay for its overhead (a good rule of thumb: each task should take ≥ 1000× more time than the scheduler overhead, typically 1–10 µs).`,
       exp: `Coarse tasks bring overhead to <1%, and the speedup tracks near-ideal scaling again.`,
+      secondary: [
+        { bottleneck: "cache contention", note: "Task-queue steal operations cause cache-line bouncing on the shared deque pointers, adding coherence overhead on top of the scheduling cost." },
+      ],
     };
   },
 
@@ -279,6 +318,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `Shared memory has 32 banks; with a stride of ${S} banks, every ${S}th lane lands on the same bank. The hardware can only serve one access per bank per cycle, so it queues the ${S} conflicting lanes — the warp effectively runs the access ${S} times in serial.`,
       how: `<b>Add 1 element of padding per row</b> to shift each successive row's bank mapping, so stride-${S} access now hits ${S} different banks. Toggle "Padding" to see the fix.`,
       exp: `With padding, even stride-${S} access is conflict-free — peak bandwidth restored.`,
+      secondary: [
+        { bottleneck: "occupancy loss", note: "Bank conflicts stall warps at the shared memory unit, reducing effective occupancy and the SM's ability to hide global memory latency." },
+      ],
     };
   },
 
@@ -307,6 +349,9 @@ export const Explain: Record<string, ExplainFn> = {
       why: `MPI_Alltoall sends O(p) messages per rank — total traffic grows as <b>p²</b>. At ${c.x} ranks each rank sends to ${c.x - 1} others, and the collective cost grows linearly with rank count. This obliterates any compute speedup.`,
       how: `Redesign the algorithm to use <b>allreduce</b> (O(log p)) or <b>reduce + broadcast</b> wherever a global all-to-all isn't strictly necessary.`,
       exp: `Switching to allreduce drops comm fraction from ${fmt(commPct, 0)}% toward single digits — scaling resumes.`,
+      secondary: [
+        { bottleneck: "bandwidth saturation", note: "The O(p²) message traffic saturates the network (or shared-memory bus on a single node), starving compute of memory bandwidth." },
+      ],
     };
   },
 
@@ -332,6 +377,9 @@ export const Explain: Record<string, ExplainFn> = {
         : `Too many MPI ranks → too much collective communication and ranks that share a NUMA socket (sub-rank affinity groups compete for shared L3).`,
       how: `<b>Match the rank count to the number of NUMA nodes</b> (2 here), then fill each socket with OpenMP threads. Try <b>4 threads/rank</b> (6 ranks × 4 threads) or <b>12 threads/rank</b> (2 ranks × 12 threads).`,
       exp: `Switching to hybrid (e.g. 6 ranks × 4 threads) reduces MPI overhead and keeps threads NUMA-local — efficiency climbs toward 80–90%.`,
+      secondary: [
+        { bottleneck: "NUMA effects", note: "With many ranks per socket, MPI processes compete for shared L3 and memory bandwidth, amplifying the NUMA penalty." },
+      ],
     };
   },
 };
@@ -353,6 +401,9 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `All threads' counters pack into the <b>same cache line(s)</b>. Every write invalidates the line in the other cores, so it ping-pongs over the coherence fabric — pure overhead, no extra work done.`,
       how: `<b>Pad each counter to its own 64-byte line.</b> Flip "Pad to cache line" — same code, just the index stride changes.`,
       exp: `On this machine padding lifts the same loop to a markedly higher speedup — toggle it and watch the curve.`,
+      secondary: [
+        { bottleneck: "bandwidth saturation", note: "Coherence traffic also saturates the memory bus — even padded code won't scale past the bus limit." },
+      ],
     };
   },
   synchronization(r) {
@@ -373,6 +424,9 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `Every iteration takes the <b>${mode}</b> lock, so the hot loop runs one-thread-at-a-time and threads queue for it. More cores add contention, not throughput.`,
       how: `Accumulate into <b>per-thread partials</b> and combine once (reduction). Pick "reduction".`,
       exp: `Reduction removes the shared write — measure it jump to many× on the very same cores.`,
+      secondary: [
+        { bottleneck: "cache contention", note: "The lock variable itself causes coherence traffic similar to false sharing." },
+      ],
     };
   },
   bandwidth(r) {
@@ -383,6 +437,9 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `The STREAM-triad is <b>memory-bound</b>. It hits <b>${fmt(r.bw!, 1)} GB/s</b> = ${fmt(r.util! * 100, 0)}% of this laptop's measured DRAM ceiling (<b>${fmt(r.peakBW!, 1)} GB/s</b>). Past saturation, extra threads just wait on the bus.`,
       how: `Don't add threads — <b>raise arithmetic intensity</b> (cache blocking / fusion) so each byte moved does more FLOPs.`,
       exp: `Higher AI lifts the kernel off the memory roofline; until then bandwidth is the hard wall.`,
+      secondary: [
+        { bottleneck: "NUMA effects", note: "On multi-socket systems, remote DRAM access compounds the bandwidth wall." },
+      ],
     };
   },
   imbalance(r) {
@@ -401,6 +458,9 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `The triangular loop gives late-indexed threads far more work; with fixed static chunks they finish last while early threads idle. Total time = the slowest thread.`,
       how: `Use <b>schedule(dynamic)</b> or <b>guided</b> so idle threads grab the remaining rows.`,
       exp: `Dynamic rebalances the load — measure the speedup climb on the same cores.`,
+      secondary: [
+        { bottleneck: "synchronization", note: "The implicit barrier at the end of the parallel region forces all threads to wait for the slowest." },
+      ],
     };
   },
   mpiHalo(r) {
@@ -419,6 +479,9 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `With the problem fixed, each rank computes less while halo exchange and launch/coordination overhead don't shrink — so efficiency falls as ranks rise.`,
       how: `Grow the problem with the ranks (weak scaling) or cut communication. <b>Note:</b> on one node MPI uses shared memory, so this wall is gentler than on a real multi-node cluster.`,
       exp: `Flip to weak scaling and watch efficiency stay high on the very same ranks.`,
+      secondary: [
+        { bottleneck: "load imbalance", note: "Non-uniform domain sizes at non-power-of-2 rank counts create residual imbalance." },
+      ],
     };
   },
   cuda(r) {
@@ -438,6 +501,9 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `At ${r.regsPerThread} registers/thread the SM's register file fills before its warp slots do, so fewer warps run concurrently and latency isn't fully hidden.`,
       how: `Reduce registers (<code>__launch_bounds__</code>, fewer live values) or choose the measured sweet-spot block (~${r.optimalBlock}). Flip to <b>light</b> to see occupancy recover.`,
       exp: `The light kernel measures markedly higher occupancy on the very same GPU.`,
+      secondary: [
+        { bottleneck: "memory latency", note: "Low occupancy means fewer warps to switch to during memory stalls — the SM idles waiting for DRAM instead of hiding latency." },
+      ],
     };
   },
   cudaCoalesce(r) {
@@ -457,6 +523,9 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `Each warp now spans ${stride} cache lines; the controller still transfers full 128-byte lines but the kernel uses a fraction of each. The wasted bytes are real DRAM traffic you paid for.`,
       how: `Reorganise so the innermost (unit-stride) index maps to <code>threadIdx.x</code> — Structure-of-Arrays layout, or transpose before the kernel.`,
       exp: `Set the stride back to 1 and watch the measured bandwidth recover to the coalesced peak on this exact card.`,
+      secondary: [
+        { bottleneck: "L2 cache thrashing", note: "Strided access pollutes the L2 with unused portions of each cache line, evicting useful data and increasing DRAM round-trips." },
+      ],
     };
   },
   cudaDivergence(r) {
@@ -476,6 +545,9 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
       why: `The warp shares one program counter, so the hardware serializes the ${D} branch paths into ${D} masked passes. The measured slowdown is the cost of those idle lane-cycles on real silicon.`,
       how: `Restructure so a whole warp takes one branch (sort/bin by condition), or go branchless with predication so there's nothing to serialize.`,
       exp: `Reduce the paths back toward 1 and the measured time drops as the warp re-converges.`,
+      secondary: [
+        { bottleneck: "instruction cache pressure", note: "Highly divergent warps execute many code paths, increasing I-cache footprint and potentially causing I-cache misses on smaller SMs." },
+      ],
     };
   },
   cudaAtomics(r) {
@@ -488,6 +560,9 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
         why: `All atomic updates to a single location queue at one L2 atomic unit. The measured slowdown is thousands of threads waiting their turn on real silicon.`,
         how: `Accumulate into per-block <code>__shared__</code> counters (or per-bin private counters), then one global <code>atomicAdd</code> per block — hierarchical reduction.`,
         exp: `Increase the targets and the measured time drops sharply until contention disappears.`,
+        secondary: [
+          { bottleneck: "memory latency", note: "Serialized atomics stall warps waiting for the L2 atomic unit, reducing occupancy and preventing latency hiding." },
+        ],
       };
     return {
       sev: eff > 60 ? "info" : "warn",
@@ -505,3 +580,50 @@ export const ExplainMeasured: Record<string, ExplainFn> = {
   mpiCollective:   (r) => ({ ...Explain.mpiCollective(r),   what: `<b>[Measured]</b> ` + Explain.mpiCollective(r).what }),
   hybridMpi:       (r) => ({ ...Explain.hybridMpi(r),       what: `<b>[Measured]</b> ` + Explain.hybridMpi(r).what }),
 };
+
+/**
+ * Compare model and measured results and return a plain-English explanation of
+ * why they differ. Returns `null` when the two are within 10%.
+ */
+export function explainDivergence(
+  model: ExperimentResult,
+  measured: ExperimentResult,
+): string | null {
+  const ms = model.current.speedup;
+  const es = measured.current.speedup;
+  if (!ms || !es) return null;
+
+  const ratio = es / ms;
+  // Within 10% — close enough
+  if (ratio >= 0.9 && ratio <= 1.1) return null;
+
+  // GPU experiments: check occupancy divergence
+  const isGpu =
+    model.experimentId.startsWith("cuda") ||
+    measured.experimentId.startsWith("cuda");
+  if (isGpu) {
+    return "The CUDA Occupancy API reports achievable occupancy, but actual occupancy depends on memory latency hiding and warp scheduling at runtime.";
+  }
+
+  // Measured is SLOWER than model by >20%
+  if (ratio < 0.8) {
+    const isBandwidth =
+      model.experimentId === "bandwidth" ||
+      measured.experimentId === "bandwidth";
+    if (isBandwidth) {
+      return "The model assumes peak DRAM bandwidth is always available. In practice, other processes and the OS compete for memory bandwidth.";
+    }
+    if (measured.current.x > 12) {
+      return "Likely causes: OS scheduler jitter, thermal throttling under sustained load, or NUMA remote accesses on a multi-socket system.";
+    }
+    return "Hardware noise, thermal management, and cache effects not captured by the analytical model account for the gap.";
+  }
+
+  // Measured is FASTER than model by >20%
+  if (ratio > 1.2) {
+    return "The model may underestimate hardware capabilities — modern CPUs aggressively prefetch and turbo-boost beyond the model's reference profile.";
+  }
+
+  // Between 10-20% divergence in either direction — modest gap, no specific diagnosis
+  return "Hardware noise, thermal management, and cache effects not captured by the analytical model account for the gap.";
+}

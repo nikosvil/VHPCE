@@ -28,6 +28,16 @@ export function drawScaling(svgEl: SVGSVGElement, res: ExperimentResult): void {
   svg.append("line").attr("x1", x(1)).attr("y1", y(1)).attr("x2", x(MAXP)).attr("y2", y(MAXP))
     .attr("stroke", "#33405a").attr("stroke-width", 2).attr("stroke-dasharray", "5 5");
   const sw = res.sweep;
+  const t1 = sw[0]?.time || 1;
+  const hasVariance = sw.some((s) => s.timeMin != null && s.timeMax != null);
+  if (hasVariance) {
+    const area = d3.area<SweepPoint>()
+      .x((d) => x(d.x))
+      .y0((d) => y(d.timeMax != null ? t1 / d.timeMax : d.speedup))
+      .y1((d) => y(d.timeMin != null ? t1 / d.timeMin : d.speedup))
+      .curve(d3.curveMonotoneX);
+    svg.append("path").datum(sw).attr("fill", C.accent).attr("opacity", 0.1).attr("d", area as any);
+  }
   const lineSp = d3.line<{ x: number; speedup: number }>().x((d) => x(d.x)).y((d) => y(d.speedup)).curve(d3.curveMonotoneX);
   const lineEf = d3.line<{ x: number; efficiency: number }>().x((d) => x(d.x)).y((d) => ye(d.efficiency)).curve(d3.curveMonotoneX);
   svg.append("path").datum(sw).attr("fill", "none").attr("stroke", C.accent2).attr("stroke-width", 1.5).attr("opacity", 0.7).attr("d", lineEf as any);

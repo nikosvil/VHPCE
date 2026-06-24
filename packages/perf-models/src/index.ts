@@ -512,11 +512,34 @@ export function runnerSpec(exp: string, p: any): { bexp: string; variant: string
   return { bexp: "imbalance", variant: p.sched };
 }
 
+function computeIntegrity(data: RunnerData): ExperimentResult["integrity"] {
+  const pts = data.points;
+  if (pts.length < 2) return undefined;
+  const variances: number[] = [];
+  for (const pt of pts) {
+    if (pt.ms > 0) {
+      const minT = (pt as any).ms_min ?? pt.ms;
+      const maxT = (pt as any).ms_max ?? pt.ms;
+      if (maxT > 0 && minT > 0) variances.push(((maxT - minT) / minT) * 100);
+    }
+  }
+  const maxVar = variances.length > 0 ? Math.max(...variances) : 0;
+  const warnings: string[] = [];
+  if (maxVar > 25) warnings.push("High variance detected (>" + Math.round(maxVar) + "%) — results may be affected by thermal throttling or background load.");
+  const lastPt = pts[pts.length - 1], firstPt = pts[0];
+  if (lastPt && firstPt && lastPt.ms > firstPt.ms * 1.5 && pts.length > 4) {
+    const ratio = lastPt.ms / firstPt.ms;
+    if (ratio > 2) warnings.push("Late sweep points are significantly slower — possible thermal throttling under sustained load.");
+  }
+  const confidence = maxVar < 10 ? "high" as const : maxVar < 25 ? "medium" as const : "low" as const;
+  return { confidence, maxVariancePct: Math.round(maxVar), warnings };
+}
+
 const tLookup = (data: RunnerData) => (p: number) => data.points[clamp(p, 1, data.points.length) - 1].ms;
 
 export const Measured: Record<string, (p: any, data: RunnerData) => ExperimentResult> = {
   falseSharing(params, data) {
-    return buildResult("falseSharing", params, tLookup(data), (cur, sw) => {
+    const result = buildResult("falseSharing", params, tLookup(data), (cur, sw) => {
       const peak = sw.reduce((a, b) => (b.speedup > a.speedup ? b : a), sw[0]);
       const loss = (1 - cur.efficiency) * 100;
       return {
@@ -530,6 +553,8 @@ export const Measured: Record<string, (p: any, data: RunnerData) => ExperimentRe
         ],
       };
     }, "measured");
+    result.integrity = computeIntegrity(data);
+    return result;
   },
   synchronization(params, data) {
     return buildResult("synchronization", params, tLookup(data), (cur, sw) => {

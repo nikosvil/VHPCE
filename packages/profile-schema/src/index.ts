@@ -17,6 +17,10 @@ export interface SweepPoint {
   efficiency: number;
   /** GPU achieved occupancy (0..1), populated by the cuda experiment */
   occ?: number;
+  /** min time across repetitions (for variance bands) */
+  timeMin?: number;
+  /** max time across repetitions (for variance bands) */
+  timeMax?: number;
 }
 
 export interface Metric {
@@ -31,6 +35,8 @@ export interface Explanation {
   why: string;
   how: string;
   exp: string;
+  secondary?: { bottleneck: string; note: string }[];
+  divergence?: string;
 }
 
 /**
@@ -77,6 +83,13 @@ export interface ExperimentResult {
   optimalBlock?: number;    // block size with the best occupancy in the sweep
   smName?: string;          // device name (measured)
   gflops?: number;
+
+  // measurement integrity (populated by measured adapters)
+  integrity?: {
+    confidence: "high" | "medium" | "low";
+    maxVariancePct: number;
+    warnings: string[];
+  };
 }
 
 /** Runner payload shape (Producer B). */

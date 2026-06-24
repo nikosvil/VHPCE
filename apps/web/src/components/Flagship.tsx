@@ -697,6 +697,19 @@ export default function Flagship() {
               <div className="eb why"><div className="t">Why</div><div className="body" dangerouslySetInnerHTML={{ __html: explanation.why }} /></div>
               <div className="eb how"><div className="t">How to fix</div><div className="body" dangerouslySetInnerHTML={{ __html: explanation.how }} /></div>
               <div className="eb exp"><div className="t">Expected after fix</div><div className="body" dangerouslySetInnerHTML={{ __html: explanation.exp }} /></div>
+              {explanation.secondary && explanation.secondary.length > 0 && (
+                <div className="eb secondary"><div className="t">Also contributing</div><div className="body">
+                  {explanation.secondary.map((s, i) => <div key={i} style={{ marginBottom: 4 }}><b>{s.bottleneck}</b>: {s.note}</div>)}
+                </div></div>
+              )}
+              {explanation.divergence && (
+                <div className="eb divergence"><div className="t">Why reality differs from the model</div><div className="body">{explanation.divergence}</div></div>
+              )}
+            </div>
+          )}
+          {result?.integrity && result.integrity.warnings.length > 0 && (
+            <div className="integrity-warn">
+              {result.integrity.warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
             </div>
           )}
         </section>
