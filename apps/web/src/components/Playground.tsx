@@ -232,7 +232,7 @@ export default function Playground() {
                 <label>Why? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional — deepens learning)</span></label>
                 <textarea
                   rows={2}
-                  placeholder="e.g. &quot;There's a critical section in the hot loop — I expect Amdahl to cap it&quot;"
+                  placeholder="e.g. There is a critical section in the hot loop — I expect Amdahl to cap it"
                   value={justification}
                   onChange={(e) => setJustification(e.target.value)}
                 />

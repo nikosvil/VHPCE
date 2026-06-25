@@ -178,7 +178,7 @@ export default function FirstRun() {
                 <label>Why do you think so? <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional)</span></label>
                 <textarea
                   rows={2}
-                  placeholder="e.g. &quot;Each thread does independent work, so I expect near-linear scaling&quot;"
+                  placeholder="e.g. Each thread does independent work, so I expect near-linear scaling"
                   value={justify[step] || ""}
                   onChange={(e) => setJustify((j) => ({ ...j, [step]: e.target.value }))}
                 />
